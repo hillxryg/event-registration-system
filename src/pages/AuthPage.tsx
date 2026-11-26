@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mail, Lock, User, ArrowRight, QrCode, ShieldCheck, Ticket } from 'lucide-react';
-import type { UserProfile, UserRole } from '../types/database';
+import type { UserProfile } from '../types/database';
+import { supabase, fetchUserProfile } from '../lib/supabase';
 
 interface AuthPageProps {
   onAuthSuccess: (profile: UserProfile) => void;
@@ -19,20 +20,23 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('guest');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const buildProfile = (r: UserRole, e: string, name: string | null): UserProfile => ({
-    id: crypto.randomUUID(),
-    email: e,
-    full_name: name,
-    role: r,
-    created_at: new Date().toISOString(),
-  });
+  const completeAuth = async (userId: string) => {
+    const profile = await fetchUserProfile(userId);
+    if (!profile) {
+      setError('Signed in, but your profile could not be loaded. Please try again.');
+      return;
+    }
+    onAuthSuccess(profile);
+  };
 
-  const handleSubmit = (ev: FormEvent) => {
+  const handleSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
     setError(null);
+    setNotice(null);
     if (!email.trim() || !password.trim()) {
       setError('Email and password are required.');
       return;
@@ -41,21 +45,46 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
       setError('Please enter your full name.');
       return;
     }
-    // TODO: Phase 3 Supabase — signInWithPassword / signUp & fetch profiles.role
-    onAuthSuccess(
-      buildProfile(role, email.trim(), mode === 'signup' ? fullName.trim() : email.split('@')[0]),
-    );
-  };
 
-  const demoAs = (r: UserRole) => {
-    // TODO: Phase 3 Supabase — signInWithPassword / signUp & fetch profiles.role
-    onAuthSuccess(
-      buildProfile(
-        r,
-        r === 'admin' ? 'admin@demo.test' : 'guest@demo.test',
-        r === 'admin' ? 'Demo Admin' : 'Demo Guest',
-      ),
-    );
+    setSubmitting(true);
+    try {
+      if (mode === 'signin') {
+        const { data, error: authError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (authError) {
+          setError(authError.message);
+          return;
+        }
+        if (!data.user) {
+          setError('Sign in failed. Please try again.');
+          return;
+        }
+        await completeAuth(data.user.id);
+      } else {
+        const { data, error: authError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: fullName.trim() } },
+        });
+        if (authError) {
+          setError(authError.message);
+          return;
+        }
+        if (!data.session || !data.user) {
+          setNotice(
+            'Check your inbox to confirm your email address, then sign in to continue.',
+          );
+          return;
+        }
+        await completeAuth(data.user.id);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const iconBadge =
@@ -110,6 +139,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                 onClick={() => {
                   setMode(m.key);
                   setError(null);
+                  setNotice(null);
                 }}
                 className="relative z-10 flex-1 rounded-full px-4 py-2 text-sm font-medium"
               >
@@ -182,65 +212,33 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
               />
             </div>
 
-            {/* Mock role selector (Phase 2B testing only) */}
-            <div className="flex items-center justify-between gap-3 text-xs text-slate-600">
-              <span>Mock role</span>
-              <div className="liquid-glass relative flex rounded-full p-1">
-                {(['guest', 'admin'] as UserRole[]).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    className="relative z-10 rounded-full px-4 py-1 font-medium capitalize"
-                  >
-                    {role === r && (
-                      <motion.span
-                        layoutId="auth-role"
-                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                        className="absolute inset-0 -z-10 rounded-full bg-white/80 shadow"
-                      />
-                    )}
-                    <span className={role === r ? 'text-violet-600' : 'text-slate-600'}>{r}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {error && (
               <p role="alert" className="rounded-full bg-rose-100/80 px-4 py-2 text-xs text-rose-700">
                 {error}
               </p>
             )}
 
+            {notice && (
+              <p role="status" className="rounded-full bg-emerald-100/80 px-4 py-2 text-xs text-emerald-700">
+                {notice}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="liquid-btn-primary w-full flex items-center justify-center gap-2"
+              disabled={submitting}
+              className="liquid-btn-primary w-full flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {mode === 'signin' ? 'Sign In' : 'Create Account'}
-              <ArrowRight size={16} />
+              {submitting
+                ? mode === 'signin'
+                  ? 'Signing In…'
+                  : 'Creating Account…'
+                : mode === 'signin'
+                  ? 'Sign In'
+                  : 'Create Account'}
+              {!submitting && <ArrowRight size={16} />}
             </button>
           </form>
-
-          {/* Quick demo bar */}
-          <div className="liquid-glass mt-6 flex items-center gap-2 rounded-full p-1.5">
-            <span className="pl-3 pr-1 text-[11px] uppercase tracking-wide text-slate-500">
-              Quick demo
-            </span>
-            <button
-              type="button"
-              onClick={() => demoAs('guest')}
-              className="flex-1 rounded-full bg-white/60 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white/90"
-            >
-              Demo as Guest
-            </button>
-            <button
-              type="button"
-              onClick={() => demoAs('admin')}
-              className="flex-1 rounded-full bg-white/60 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white/90"
-            >
-              Demo as Admin
-            </button>
-          </div>
         </div>
       </motion.div>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LogOut, User } from 'lucide-react';
 import type { UserProfile } from './types/database';
+import { supabase, fetchUserProfile } from './lib/supabase';
 import AuthPage from './pages/AuthPage';
 import RegisterPage from './pages/RegisterPage';
 import ScannerPage from './pages/ScannerPage';
@@ -14,8 +15,8 @@ function navigateTo(path: string) {
 
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
-  // TODO: Phase 3 Supabase — hydrate currentUser from supabase.auth.getSession() + profiles table
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -23,13 +24,50 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrate = async (userId: string) => {
+      const profile = await fetchUserProfile(userId);
+      if (!cancelled) setCurrentUser(profile);
+    };
+
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.user) await hydrate(data.session.user.id);
+      } finally {
+        if (!cancelled) setInitializing(false);
+      }
+    })();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        if (!cancelled) setCurrentUser(null);
+        return;
+      }
+      if (event === 'SIGNED_IN' && session?.user) {
+        const userId = session.user.id;
+        // Deferred to avoid awaiting Supabase calls inside the auth callback.
+        setTimeout(() => {
+          void hydrate(userId);
+        }, 0);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
   const handleAuthSuccess = (profile: UserProfile) => {
     setCurrentUser(profile);
     navigateTo(profile.role === 'admin' ? '/admin' : '/register');
   };
 
-  const handleSignOut = () => {
-    // TODO: Phase 3 Supabase — await supabase.auth.signOut()
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
     setCurrentUser(null);
     navigateTo('/');
   };
@@ -37,6 +75,17 @@ export default function App() {
   // Public PIN-protected Gate Scanner (/scanner or /scanner/:slug)
   if (path === '/scanner' || path.startsWith('/scanner/')) {
     return <ScannerPage />;
+  }
+
+  // Wait for initial session check so protected routes don't flash AuthPage
+  if (initializing) {
+    return (
+      <div className="pastel-mesh-bg min-h-screen flex items-center justify-center p-4">
+        <div className="liquid-glass rounded-full px-6 py-3 text-sm font-medium text-slate-700 animate-pulse">
+          Loading…
+        </div>
+      </div>
+    );
   }
 
   // Admin Dashboard (/admin) — guarded by role === 'admin'
