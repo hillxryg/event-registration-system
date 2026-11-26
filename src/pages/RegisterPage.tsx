@@ -143,7 +143,7 @@ function Field({
           onBlur={onBlur}
           aria-invalid={error ? 'true' : 'false'}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="liquid-pill-input"
+          className="liquid-pill-input pl-16"
         />
       </div>
       <AnimatePresence initial={false}>

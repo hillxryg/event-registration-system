@@ -114,3 +114,63 @@ begin
   );
 end;
 $$;
+
+-- 5. User Profiles & Role-Based Access ('guest' | 'admin')
+create table public.profiles (
+    id uuid primary key references auth.users (id) on delete cascade,
+    email text not null,
+    full_name text,
+    role text not null default 'guest' check (role in ('guest', 'admin')),
+    created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+-- Users can read their own profile (to check role on login)
+create policy "Users read own profile" on public.profiles for
+select using (auth.uid () = id);
+
+-- Users can update their own profile
+create policy "Users update own profile" on public.profiles for
+update using (auth.uid () = id);
+
+-- Helper function to check admin role cleanly in RLS
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+stable
+as $$select exists ( select 1 from public.profiles where id = auth.uid() and role = 'admin' );$$;
+;
+
+-- Automatically create a 'guest' profile when someone signs up
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+as $$ begin insert into public.profiles (id, email, full_name, role) values ( new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', ''), 'guest' ); return new; end; $$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- Tighten admin policies so only role = 'admin' can manage events/all attendees
+drop policy if exists "Authenticated full access events" on public.events;
+
+create policy "Admins full access events" on public.events for all using (public.is_admin ());
+
+drop policy if exists "Authenticated full access attendees" on public.attendees;
+
+create policy "Admins full access attendees" on public.attendees for all using (public.is_admin ());
+
+-- Logged-in guests can view their own registered passes
+create policy "Guests read own registrations" on public.attendees for
+select using (
+        auth.uid () is not null
+        and email = (
+            select email
+            from public.profiles
+            where
+                id = auth.uid ()
+        )
+    );

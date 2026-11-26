@@ -1,3 +1,13 @@
+export type UserRole = 'guest' | 'admin';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: UserRole;
+  created_at: string;
+}
+
 export interface EventItem {
   id: string;
   slug: string;
