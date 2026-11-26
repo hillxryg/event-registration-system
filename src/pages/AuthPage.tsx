@@ -8,12 +8,35 @@ interface AuthPageProps {
   onAuthSuccess: (profile: UserProfile) => void;
 }
 
-type Mode = 'signin' | 'signup';
+type Mode = 'signin' | 'signup' | 'magic';
 
 const MODES: { key: Mode; label: string }[] = [
   { key: 'signin', label: 'Sign In' },
   { key: 'signup', label: 'Create Account' },
+  { key: 'magic', label: 'Email Link' },
 ];
+
+const AUTH_REDIRECT_KEY = 'passflow_auth_redirect';
+
+const redirectUrl = () => {
+  let stored: string | null = null;
+  try {
+    stored = window.sessionStorage.getItem(AUTH_REDIRECT_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  return `${window.location.origin}${stored ?? '/my-passes'}`;
+};
+
+// Profile row is created by the `on_auth_user_created` trigger; allow it a moment on first signup.
+const loadProfileWithRetry = async (userId: string): Promise<UserProfile | null> => {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const profile = await fetchUserProfile(userId);
+    if (profile) return profile;
+    await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  return null;
+};
 
 export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [mode, setMode] = useState<Mode>('signin');
@@ -25,7 +48,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [submitting, setSubmitting] = useState(false);
 
   const completeAuth = async (userId: string) => {
-    const profile = await fetchUserProfile(userId);
+    const profile = await loadProfileWithRetry(userId);
     if (!profile) {
       setError('Signed in, but your profile could not be loaded. Please try again.');
       return;
@@ -37,8 +60,8 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
     ev.preventDefault();
     setError(null);
     setNotice(null);
-    if (!email.trim() || !password.trim()) {
-      setError('Email and password are required.');
+    if (!email.trim() || (mode !== 'magic' && !password.trim())) {
+      setError(mode === 'magic' ? 'Email is required.' : 'Email and password are required.');
       return;
     }
     if (mode === 'signup' && !fullName.trim()) {
@@ -62,11 +85,14 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
           return;
         }
         await completeAuth(data.user.id);
-      } else {
+      } else if (mode === 'signup') {
         const { data, error: authError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: fullName.trim() } },
+          options: {
+            data: { full_name: fullName.trim() },
+            emailRedirectTo: redirectUrl(),
+          },
         });
         if (authError) {
           setError(authError.message);
@@ -79,6 +105,16 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
           return;
         }
         await completeAuth(data.user.id);
+      } else {
+        const { error: authError } = await supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: { shouldCreateUser: true, emailRedirectTo: redirectUrl() },
+        });
+        if (authError) {
+          setError(authError.message);
+          return;
+        }
+        setNotice('Check your inbox for a sign-in link. Open it on this device to continue.');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
@@ -124,10 +160,18 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
         {/* Form panel */}
         <div className="p-6 sm:p-10">
           <h2 className="text-2xl font-semibold text-slate-800">
-            {mode === 'signin' ? 'Welcome back' : 'Create your account'}
+            {mode === 'signin'
+              ? 'Welcome back'
+              : mode === 'signup'
+                ? 'Create your account'
+                : 'Sign in with an email link'}
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            {mode === 'signin' ? 'Sign in to continue.' : 'It only takes a moment.'}
+            {mode === 'signin'
+              ? 'Sign in to continue.'
+              : mode === 'signup'
+                ? 'It only takes a moment.'
+                : 'No password needed. We’ll email you a one-tap link.'}
           </p>
 
           {/* Segmented pill switcher */}
@@ -141,7 +185,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                   setError(null);
                   setNotice(null);
                 }}
-                className="relative z-10 flex-1 rounded-full px-4 py-2 text-sm font-medium"
+                className="relative z-10 flex-1 rounded-full px-3 py-2 text-xs sm:text-sm font-medium"
               >
                 {mode === m.key && (
                   <motion.span
@@ -198,28 +242,30 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
               />
             </div>
 
-            <div className="relative">
-              <span className={iconBadge}>
-                <Lock size={16} />
-              </span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                className="liquid-pill-input w-full pl-14"
-              />
-            </div>
+            {mode !== 'magic' && (
+              <div className="relative">
+                <span className={iconBadge}>
+                  <Lock size={16} />
+                </span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  className="liquid-pill-input w-full pl-14"
+                />
+              </div>
+            )}
 
             {error && (
-              <p role="alert" className="rounded-full bg-rose-100/80 px-4 py-2 text-xs text-rose-700">
+              <p role="alert" className="rounded-2xl bg-rose-100/80 px-4 py-2 text-xs text-rose-700">
                 {error}
               </p>
             )}
 
             {notice && (
-              <p role="status" className="rounded-full bg-emerald-100/80 px-4 py-2 text-xs text-emerald-700">
+              <p role="status" className="rounded-2xl bg-emerald-100/80 px-4 py-2 text-xs text-emerald-700">
                 {notice}
               </p>
             )}
@@ -232,10 +278,14 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
               {submitting
                 ? mode === 'signin'
                   ? 'Signing In…'
-                  : 'Creating Account…'
+                  : mode === 'signup'
+                    ? 'Creating Account…'
+                    : 'Sending Link…'
                 : mode === 'signin'
                   ? 'Sign In'
-                  : 'Create Account'}
+                  : mode === 'signup'
+                    ? 'Create Account'
+                    : 'Send Magic Link'}
               {!submitting && <ArrowRight size={16} />}
             </button>
           </form>

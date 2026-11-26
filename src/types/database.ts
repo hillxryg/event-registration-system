@@ -1,7 +1,7 @@
 export type UserRole = 'guest' | 'admin';
 export type EventVisibility = 'public' | 'exclusive';
 export type EventStatus = 'active' | 'closed' | 'cancelled';
-export type RegistrationStatus = 'approved' | 'pending' | 'declined';
+export type RegistrationStatus = 'approved' | 'pending' | 'declined' | 'cancelled';
 
 export interface UserProfile {
   id: string;

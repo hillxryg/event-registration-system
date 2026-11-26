@@ -2,11 +2,9 @@
 
 ## Current Project Phase
 - **Completed:**
-  - Phase 1–3C: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Shareable `/register/:slug` Invite Links, Public Events Directory (`/register`), & Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`)
-- **Active:** Phase 3D — Event Lifecycle Status (`active` | `closed` | `cancelled`) & Searchable, Status-Filtered Event Switcher in `AdminPage`
-- **Upcoming:**
-  - Phase 4: Supabase Edge Function + Resend Automated HTML QR Ticket Email (triggered on instant public approval or when admin approves a pending exclusive guest)
-  - Phase 5: End-to-End Testing & Deployment
+  - Phase 1–3D: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Shareable `/register/:slug` Invite Links, Public Events Directory (`/register`), Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`), & Event Lifecycle Status (`active` | `closed` | `cancelled`) with Searchable, Status-Filtered Event Switcher in `AdminPage`
+  - Phase 4: Supabase Edge Function (`send-ticket-email`) + Gmail SMTP (`nodemailer` + `qrcode` inline CID PNG attachment) automated HTML QR ticket delivery triggered on instant public approval or when admin approves a pending exclusive guest; public unauthenticated access to `/register` and `/register/:slug`
+- **Active:** Phase 5 — Guest Dashboard (`/my-passes`), Persistent Pass Lookup, Attendance Cancellation (`cancelled`), & End-to-End Testing / Deployment
 
 ## Current File Tree
 ```text
@@ -15,15 +13,18 @@ event-checkin/
 │   ├── lib/
 │   │   └── supabase.ts       # Exports `supabase` and `fetchUserProfile`
 │   ├── pages/
-│   │   ├── AuthPage.tsx      # Real Supabase signInWithPassword / signUp
-│   │   ├── RegisterPage.tsx  # Target (Phase 3D) — Replace `is_active` with `status: EventStatus`; show notices for `closed` / `cancelled` events
-│   │   ├── ScannerPage.tsx   # Target (Phase 3D) — Allow `active` and `closed` events; block `cancelled` events
-│   │   └── AdminPage.tsx     # Target (Phase 3D) — Searchable + status-filtered `EventDropdown` & one-click `active` / `closed` / `cancelled` event status selector
+│   │   ├── AuthPage.tsx      # Real Supabase signInWithPassword / signUp (next: support guest sign-in & redirect to `/my-passes`)
+│   │   ├── RegisterPage.tsx  # Public directory (`/register`) + event registration (`/register/:slug`) with live DigitalPass & `send-ticket-email` invocation
+│   │   ├── ScannerPage.tsx   # Allows `active` and `closed` events; blocks `cancelled` events
+│   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status selector, & attendee approval (`send-ticket-email` trigger)
 │   ├── types/
 │   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus, UserProfile, EventItem, Attendee, CheckInResponse
-│   ├── App.tsx               # Preserves intended `/register/:slug` path after login
+│   ├── App.tsx               # Public `/register` & `/register/:slug` routes + role-based routing
 │   └── index.css             # .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
 ├── supabase/
+│   ├── functions/
+│   │   └── send-ticket-email/
+│   │       └── index.ts      # Edge Function generating inline PNG QR via `qrcode` and sending HTML pass via Gmail SMTP (`nodemailer`)
 │   └── schema.sql
 └── PROJECT_SPEC.md
 ```
@@ -32,7 +33,7 @@ event-checkin/
 - Frontend: React 19 + Vite + TypeScript + Tailwind CSS v4 (@tailwindcss/vite)
 - Motion & Icons: motion (MUST import from motion/react) + lucide-react
 - QR Packages: qrcode.react (QRCodeSVG for client-side ticket rendering) + html5-qrcode(camera scanner)
-- Backend & Database: Supabase (PostgreSQL, Auth, Edge Functions) + Resend API (automated HTML emails)
+- Backend & Database: Supabase (PostgreSQL, Auth, Edge Functions) + Gmail SMTP via Nodemailer (GMAIL_USER, GMAIL_APP_PASSWORD Edge Function secrets)
 
 ## Visual Design Tokens (Already defined in src/index.css)
 - Mesh Gradient Colors: Vanilla Cream #F6E9CC, Baby Blue #D0E7F6, Cotton Candy #F0C9EF, Rose Quartz #F1C9CF, Lavender #BBAEEC
@@ -43,7 +44,7 @@ event-checkin/
 - UserRole: 'guest' | 'admin'
 - EventVisibility: 'public' | 'exclusive'
 - EventStatus: 'active' | 'closed' | 'cancelled'
-- RegistrationStatus: 'approved' | 'pending' | 'declined'
+- RegistrationStatus: 'approved' | 'pending' | 'declined'(next: add 'cancelled' in Phase 5)
 - EventItem: { id, slug, title, description, event_date, venue, visibility, status, scanner_pin?, created_at }
 - Attendee: { id, event_id, ticket_code, full_name, email, organization, contact_number, status, checked_in, checked_in_at, created_at }
 

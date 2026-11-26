@@ -42,6 +42,7 @@ const REG_STATUS_UI: Record<RegistrationStatus, { label: string; cls: string }> 
   pending: { label: 'Pending Approval', cls: 'bg-amber-100/90 text-amber-700' },
   approved: { label: 'Approved', cls: 'bg-emerald-100/90 text-emerald-700' },
   declined: { label: 'Declined', cls: 'bg-rose-100/90 text-rose-700' },
+  cancelled: { label: 'Cancelled', cls: 'bg-slate-200/80 text-slate-600' },
 };
 
 const EVENT_STATUSES: EventStatus[] = ['active', 'closed', 'cancelled'];

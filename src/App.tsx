@@ -1,16 +1,41 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, LogIn, LogOut, User } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, Ticket, User } from 'lucide-react';
 import type { UserProfile } from './types/database';
 import { supabase, fetchUserProfile } from './lib/supabase';
 import AuthPage from './pages/AuthPage';
 import RegisterPage from './pages/RegisterPage';
 import ScannerPage from './pages/ScannerPage';
 import AdminPage from './pages/AdminPage';
+import GuestDashboardPage from './pages/GuestDashboardPage';
 
 function navigateTo(path: string) {
   if (window.location.pathname === path) return;
   window.history.pushState({}, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+const AUTH_REDIRECT_KEY = 'passflow_auth_redirect';
+
+const isRegisterPath = (p: string) => p === '/register' || p.startsWith('/register/');
+
+function rememberRedirect() {
+  try {
+    if (isRegisterPath(window.location.pathname)) {
+      window.sessionStorage.setItem(AUTH_REDIRECT_KEY, window.location.pathname);
+    }
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function consumeRedirect(): string | null {
+  try {
+    const stored = window.sessionStorage.getItem(AUTH_REDIRECT_KEY);
+    window.sessionStorage.removeItem(AUTH_REDIRECT_KEY);
+    return stored;
+  } catch {
+    return null;
+  }
 }
 
 export default function App() {
@@ -62,14 +87,13 @@ export default function App() {
 
   const handleAuthSuccess = (profile: UserProfile) => {
     setCurrentUser(profile);
+    const remembered = consumeRedirect();
     if (profile.role === 'admin') {
       navigateTo('/admin');
       return;
     }
-    const intended = window.location.pathname;
-    navigateTo(
-      intended === '/register' || intended.startsWith('/register/') ? intended : '/register',
-    );
+    const intended = remembered ?? window.location.pathname;
+    navigateTo(isRegisterPath(intended) ? intended : '/my-passes');
   };
 
   const handleSignOut = async () => {
@@ -99,7 +123,14 @@ export default function App() {
     return <AdminPage user={currentUser} onSignOut={handleSignOut} />;
   }
 
-  if (path === '/register' || path.startsWith('/register/')) {
+  if (path === '/my-passes' || path.startsWith('/my-passes/')) {
+    if (!currentUser) {
+      return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+    }
+    return <GuestDashboardPage user={currentUser} onSignOut={handleSignOut} />;
+  }
+
+  if (isRegisterPath(path)) {
     return (
       <div className="relative">
         <div className="fixed right-4 top-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-white/75 bg-white/55 px-3 py-1.5 text-xs font-semibold text-[#18181B] shadow-sm backdrop-blur-xl">
@@ -107,7 +138,7 @@ export default function App() {
             <>
               <User size={14} className="shrink-0 text-violet-600" />
               <span className="max-w-[110px] truncate sm:max-w-[160px]">{currentUser.email}</span>
-              {currentUser.role === 'admin' && (
+              {currentUser.role === 'admin' ? (
                 <button
                   type="button"
                   onClick={() => navigateTo('/admin')}
@@ -115,6 +146,15 @@ export default function App() {
                 >
                   <ArrowLeft size={12} />
                   Dashboard
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/my-passes')}
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
+                >
+                  <Ticket size={12} />
+                  My Passes
                 </button>
               )}
               <button
@@ -129,7 +169,10 @@ export default function App() {
           ) : (
             <button
               type="button"
-              onClick={() => navigateTo('/')}
+              onClick={() => {
+                rememberRedirect();
+                navigateTo('/');
+              }}
               className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[#18181B] px-3 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
             >
               <LogIn size={12} />
@@ -137,7 +180,7 @@ export default function App() {
             </button>
           )}
         </div>
-        <RegisterPage />
+        <RegisterPage viewer={currentUser} />
       </div>
     );
   }
@@ -146,21 +189,7 @@ export default function App() {
     return currentUser.role === 'admin' ? (
       <AdminPage user={currentUser} onSignOut={handleSignOut} />
     ) : (
-      <div className="relative">
-        <div className="fixed right-4 top-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-white/75 bg-white/55 px-3 py-1.5 text-xs font-semibold text-[#18181B] shadow-sm backdrop-blur-xl">
-          <User size={14} className="shrink-0 text-violet-600" />
-          <span className="max-w-[110px] truncate sm:max-w-[160px]">{currentUser.email}</span>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#18181B] px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
-          >
-            <LogOut size={12} />
-            Sign Out
-          </button>
-        </div>
-        <RegisterPage />
-      </div>
+      <GuestDashboardPage user={currentUser} onSignOut={handleSignOut} />
     );
   }
 
