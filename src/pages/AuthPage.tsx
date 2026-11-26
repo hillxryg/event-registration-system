@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mail, Lock, User, ArrowRight, QrCode, ShieldCheck, Ticket } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, ShieldCheck, Ticket } from 'lucide-react';
 import type { UserProfile } from '../types/database';
 import { supabase, fetchUserProfile } from '../lib/supabase';
 
@@ -17,6 +17,23 @@ const MODES: { key: Mode; label: string }[] = [
 ];
 
 const AUTH_REDIRECT_KEY = 'passflow_auth_redirect';
+
+function BrandLink() {
+  return (
+    <button
+      type="button"
+      aria-label="PassFlow home"
+      onClick={() => {
+        window.history.pushState({}, '', '/register');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }}
+      className="inline-flex min-w-0 items-center gap-2.5 rounded-full"
+    >
+      <img src="/passflow-logo.svg" alt="PassFlow" className="size-10 shrink-0" />
+      <span className="truncate text-xl font-extrabold tracking-tight text-slate-800">PassFlow</span>
+    </button>
+  );
+}
 
 const redirectUrl = () => {
   let stored: string | null = null;
@@ -136,9 +153,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
       >
         {/* Brand panel */}
         <div className="hidden md:flex flex-col justify-between p-10 bg-white/20">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/60 text-violet-500 shadow-sm">
-            <QrCode size={28} />
-          </div>
+          <BrandLink />
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-slate-800">
               Events, checked in at the speed of a glance.
@@ -159,6 +174,9 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
 
         {/* Form panel */}
         <div className="p-6 sm:p-10">
+          <div className="mb-6 md:hidden">
+            <BrandLink />
+          </div>
           <h2 className="text-2xl font-semibold text-slate-800">
             {mode === 'signin'
               ? 'Welcome back'

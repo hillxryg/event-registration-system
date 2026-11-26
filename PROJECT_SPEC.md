@@ -4,22 +4,28 @@
 - **Completed:**
   - Phase 1–3D: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Shareable `/register/:slug` Invite Links, Public Events Directory (`/register`), Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`), & Event Lifecycle Status (`active` | `closed` | `cancelled`) with Searchable, Status-Filtered Event Switcher in `AdminPage`
   - Phase 4: Supabase Edge Function (`send-ticket-email`) + Gmail SMTP (`nodemailer` + `qrcode` inline CID PNG attachment) automated HTML QR ticket delivery triggered on instant public approval or when admin approves a pending exclusive guest; public unauthenticated access to `/register` and `/register/:slug`
-- **Active:** Phase 5 — Guest Dashboard (`/my-passes`), Persistent Pass Lookup, Attendance Cancellation (`cancelled`), & End-to-End Testing / Deployment
+  - Phase 5: Guest Dashboard (`GuestDashboardPage.tsx` at `/my-passes`), `localStorage` pass persistence (`passflow_ticket_${event.id}`), magic-link OTP authentication in `AuthPage.tsx`, `'cancelled'` registration status & RLS self-cancellation trigger
+- **Active:** Phase 6 — PassFlow Branding & Logo (`/passflow-logo.svg`), Mobile Hamburger Navigation, Responsive Card Grids (`GuestDashboardPage` & `RegisterPage`), & Signed-In / Duplicate Registration Detection
+- **Upcoming:**
+  - Phase 7: End-to-End Testing & Deployment
 
 ## Current File Tree
 ```text
 event-checkin/
+├── public/
+│   └── passflow-logo.svg     # PassFlow brand logo
 ├── src/
 │   ├── lib/
 │   │   └── supabase.ts       # Exports `supabase` and `fetchUserProfile`
 │   ├── pages/
-│   │   ├── AuthPage.tsx      # Real Supabase signInWithPassword / signUp (next: support guest sign-in & redirect to `/my-passes`)
-│   │   ├── RegisterPage.tsx  # Public directory (`/register`) + event registration (`/register/:slug`) with live DigitalPass & `send-ticket-email` invocation
+│   │   ├── AuthPage.tsx      # Supabase `signInWithPassword`, `signUp`, & `signInWithOtp` (magic link) with redirect persistence
+│   │   ├── GuestDashboardPage.tsx # Guest `/my-passes` dashboard with status filter pills, QR pass modal, & attendance cancellation
+│   │   ├── RegisterPage.tsx  # Public directory (`/register`) + event registration (`/register/:slug`) with `localStorage` pass persistence & `send-ticket-email` invocation
 │   │   ├── ScannerPage.tsx   # Allows `active` and `closed` events; blocks `cancelled` events
 │   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status selector, & attendee approval (`send-ticket-email` trigger)
 │   ├── types/
-│   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus, UserProfile, EventItem, Attendee, CheckInResponse
-│   ├── App.tsx               # Public `/register` & `/register/:slug` routes + role-based routing
+│   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus (`approved` | `pending` | `declined` | `cancelled`), UserProfile, EventItem, Attendee, CheckInResponse
+│   ├── App.tsx               # Public `/register` & `/register/:slug` routes, protected `/my-passes` & `/admin` routes, & role-based routing
 │   └── index.css             # .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
 ├── supabase/
 │   ├── functions/

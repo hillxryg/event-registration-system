@@ -803,41 +803,24 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
       <div className="mx-auto max-w-6xl space-y-4">
         {/* Header */}
         <header className="liquid-glass relative z-30 rounded-3xl p-3 overflow-visible! sm:p-4">
+          {/* Row 1: brand + navigation & account */}
           <div className="flex items-center gap-3">
-            {/* Admin badge (desktop) */}
-            <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700 lg:flex">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
-                <ShieldCheck size={16} />
-              </span>
-              <span className="max-w-[180px] truncate">{user.full_name ?? user.email}</span>
-            </div>
-
-            <EventDropdown
-              events={events}
-              selectedId={eventId}
-              loading={loading}
-              onSelect={setEventId}
-              className="min-w-0 flex-1 lg:w-64 lg:flex-none"
-            />
-
-            {/* Desktop actions */}
-            <button
-              onClick={() => setModalOpen(true)}
-              className="liquid-btn-primary hidden shrink-0 items-center gap-1.5 whitespace-nowrap lg:flex"
+            <a
+              href="/admin"
+              onClick={(e) => {
+                e.preventDefault();
+                setMenuOpen(false);
+                navigate('/admin');
+              }}
+              aria-label="PassFlow admin home"
+              className="flex shrink-0 items-center gap-2"
             >
-              <Plus size={16} /> New Event
-            </button>
+              <img src="/passflow-logo.svg" alt="" className="h-8 w-8 shrink-0" />
+              <span className="text-lg font-extrabold tracking-tight text-[#18181B]">PassFlow</span>
+            </a>
 
-            <div className="ml-auto hidden items-center gap-2 lg:flex">
-              <button
-                type="button"
-                onClick={copyInviteLink}
-                disabled={!event}
-                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700 disabled:opacity-50"
-              >
-                {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                {copied ? 'Copied!' : 'Copy Link'}
-              </button>
+            {/* Desktop nav & account (xl+) */}
+            <div className="ml-auto hidden min-w-0 items-center gap-2 xl:flex">
               <a
                 href={registerPath}
                 onClick={(e) => {
@@ -858,6 +841,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               >
                 <ScanLine size={14} /> Scanner
               </a>
+              <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
+                  <ShieldCheck size={16} />
+                </span>
+                <span className="max-w-[140px] truncate">{user.full_name ?? user.email}</span>
+              </div>
               <button
                 onClick={onSignOut}
                 className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
@@ -866,34 +855,20 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               </button>
             </div>
 
-            {/* Hamburger (< lg) */}
+            {/* Hamburger (< xl) */}
             <button
               type="button"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label={menuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={menuOpen}
               aria-controls="admin-mobile-drawer"
-              className="liquid-glass flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-700 lg:hidden"
+              className="liquid-glass ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-700 xl:hidden"
             >
               {menuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
 
-          {/* Event status sub-bar */}
-          {event && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/40 pt-3">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                Event status
-              </span>
-              <EventStatusControl
-                status={event.status}
-                updating={statusUpdating}
-                onChange={updateEventStatus}
-              />
-            </div>
-          )}
-
-          {/* Mobile drawer */}
+          {/* Mobile drawer (< xl) */}
           <AnimatePresence initial={false}>
             {menuOpen && (
               <motion.div
@@ -902,27 +877,9 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
-                className="overflow-hidden lg:hidden"
+                className="overflow-hidden xl:hidden"
               >
                 <div className="liquid-glass mt-3 flex flex-col gap-2 rounded-2xl p-3">
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setModalOpen(true);
-                    }}
-                    className="liquid-btn-primary flex w-full shrink-0 items-center justify-center gap-1.5 whitespace-nowrap"
-                  >
-                    <Plus size={16} /> New Event
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyInviteLink}
-                    disabled={!event}
-                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700 disabled:opacity-50"
-                  >
-                    {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                    {copied ? 'Copied!' : 'Copy Link'}
-                  </button>
                   <a
                     href={registerPath}
                     onClick={(e) => {
@@ -945,7 +902,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                   >
                     <ScanLine size={14} /> Scanner Link
                   </a>
-                  <div className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
+                  <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
                       <ShieldCheck size={16} />
                     </span>
@@ -961,6 +918,44 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Row 2: event context & controls */}
+          <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-white/40 pt-3">
+            <EventDropdown
+              events={events}
+              selectedId={eventId}
+              loading={loading}
+              onSelect={setEventId}
+              className="w-full min-w-0 sm:w-auto sm:max-w-xs sm:flex-1"
+            />
+            <button
+              onClick={() => setModalOpen(true)}
+              className="liquid-btn-primary flex shrink-0 items-center gap-1.5 whitespace-nowrap"
+            >
+              <Plus size={16} /> New Event
+            </button>
+            <button
+              type="button"
+              onClick={copyInviteLink}
+              disabled={!event}
+              className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+              {copied ? 'Copied!' : 'Copy Link'}
+            </button>
+            {event && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Event status
+                </span>
+                <EventStatusControl
+                  status={event.status}
+                  updating={statusUpdating}
+                  onChange={updateEventStatus}
+                />
+              </div>
+            )}
+          </div>
         </header>
 
         {error && (

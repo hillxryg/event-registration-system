@@ -13,6 +13,7 @@ import {
   Globe,
   Loader2,
   Lock,
+  LogIn,
   Mail,
   MapPin,
   Phone,
@@ -21,12 +22,62 @@ import {
   User,
   XCircle,
 } from 'lucide-react';
-import type { Attendee, EventItem } from '../types/database';
+import type { LucideIcon } from 'lucide-react';
+import type { Attendee, EventItem, RegistrationStatus, UserProfile } from '../types/database';
 import { supabase } from '../lib/supabase';
 
 const getSlugFromPath = (): string | null => {
   const [, , slug] = window.location.pathname.split('/');
   return slug ? decodeURIComponent(slug) : null;
+};
+
+const AUTH_REDIRECT_KEY = 'passflow_auth_redirect';
+const ticketStorageKey = (eventId: string) => `passflow_ticket_${eventId}`;
+
+const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
+
+function goTo(path: string) {
+  if (window.location.pathname === path) return;
+  window.history.pushState({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function readStoredTicketId(eventId: string): string | null {
+  try {
+    return window.localStorage.getItem(ticketStorageKey(eventId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredTicketId(eventId: string, attendeeId: string) {
+  try {
+    window.localStorage.setItem(ticketStorageKey(eventId), attendeeId);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function clearStoredTicketId(eventId: string) {
+  try {
+    window.localStorage.removeItem(ticketStorageKey(eventId));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+const REG_STATUS_META: Record<
+  RegistrationStatus,
+  { label: string; badge: string; Icon: LucideIcon }
+> = {
+  approved: {
+    label: 'Registered · Approved',
+    badge: 'bg-emerald-100/90 text-emerald-700',
+    Icon: CheckCircle2,
+  },
+  pending: { label: 'Pending Approval', badge: 'bg-amber-100/90 text-amber-700', Icon: Clock },
+  declined: { label: 'Declined', badge: 'bg-rose-100/90 text-rose-700', Icon: XCircle },
+  cancelled: { label: 'Cancelled', badge: 'bg-slate-200/80 text-slate-600', Icon: XCircle },
 };
 
 const EVENT_COLUMNS =
@@ -182,6 +233,9 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
   const isApproved = confirmed && attendee.status === 'approved';
   const isPending = confirmed && attendee.status === 'pending';
   const isDeclined = confirmed && attendee.status === 'declined';
+  const isCancelled = confirmed && attendee.status === 'cancelled';
+  const isVoid = isDeclined || isCancelled;
+  const voidTitle = isCancelled ? 'Registration Cancelled' : 'Registration Declined';
 
   return (
     <div className="liquid-glass overflow-hidden">
@@ -194,8 +248,8 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
                 ? 'Confirmed Pass'
                 : isPending
                   ? 'Pending Approval'
-                  : isDeclined
-                    ? 'Registration Declined'
+                  : isVoid
+                    ? voidTitle
                     : 'Live Preview'}
             </p>
             <h2 className="mt-1.5 text-2xl font-extrabold leading-tight tracking-tight text-[#18181B]">
@@ -208,7 +262,7 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
                 ? 'bg-emerald-500 text-white'
                 : isPending
                   ? 'bg-amber-400 text-white'
-                  : isDeclined
+                  : isVoid
                     ? 'bg-rose-500 text-white'
                     : 'bg-white/80 text-[#18181B]'
             }`}
@@ -217,7 +271,7 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
               <CheckCircle2 size={22} />
             ) : isPending ? (
               <Clock size={20} />
-            ) : isDeclined ? (
+            ) : isVoid ? (
               <XCircle size={22} />
             ) : (
               <Ticket size={20} />
@@ -281,15 +335,16 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
         </div>
 
         {/* QR safe zone */}
-        {isDeclined ? (
+        {isVoid ? (
           <div className="flex flex-col items-center gap-3 pt-1">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100/90 px-3.5 py-1.5 text-xs font-bold text-rose-700">
               <XCircle size={13} />
-              Registration Declined
+              {voidTitle}
             </span>
             <p className="text-center text-xs font-medium text-[#18181B]/60">
-              The organizer couldn’t approve your registration for this event, so no QR pass was
-              issued.
+              {isCancelled
+                ? 'This registration was cancelled, so the QR pass is no longer valid.'
+                : 'The organizer couldn’t approve your registration for this event, so no QR pass was issued.'}
             </p>
           </div>
         ) : (
@@ -340,7 +395,11 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
   );
 }
 
-export default function RegisterPage() {
+interface RegisterPageProps {
+  viewer?: UserProfile | null;
+}
+
+export default function RegisterPage({ viewer = null }: RegisterPageProps) {
   const [slug, setSlug] = useState<string | null>(getSlugFromPath);
   const [event, setEvent] = useState<EventItem | null>(null);
   const [publicEvents, setPublicEvents] = useState<EventItem[]>([]);
@@ -353,6 +412,10 @@ export default function RegisterPage() {
   const [touched, setTouched] = useState<Partial<Record<keyof FormValues, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState<Attendee | null>(null);
+  const [existingReg, setExistingReg] = useState<Attendee | null>(null);
+  const [isSignedIn, setIsSignedIn] = useState(Boolean(viewer));
+  const [duplicateAttempt, setDuplicateAttempt] = useState(false);
+  const [myRegs, setMyRegs] = useState<Record<string, Attendee>>({});
 
   const errors = useMemo(() => validate(values), [values]);
   const visibleErrors: FormErrors = Object.fromEntries(
@@ -372,6 +435,8 @@ export default function RegisterPage() {
     setEvent(null);
     setLoadError(null);
     setConfirmed(null);
+    setExistingReg(null);
+    setDuplicateAttempt(false);
     setValues(EMPTY_FORM);
     setTouched({});
     setSubmitError(null);
@@ -388,10 +453,54 @@ export default function RegisterPage() {
         if (cancelled) return;
         if (error) {
           setLoadError('We couldn’t load upcoming events. Please try again.');
-        } else {
-          setPublicEvents((data ?? []) as EventItem[]);
+          setDirectoryLoading(false);
+          return;
         }
+        const list = (data ?? []) as EventItem[];
+        setPublicEvents(list);
         setDirectoryLoading(false);
+
+        if (list.length === 0) {
+          setMyRegs({});
+          return;
+        }
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (cancelled) return;
+
+        const regMap: Record<string, Attendee> = {};
+
+        // 1. Check persisted localStorage ticket IDs for returning unauthenticated guests
+        const storedIds = list
+          .map((e) => readStoredTicketId(e.id))
+          .filter((id): id is string => Boolean(id));
+        if (storedIds.length > 0) {
+          const { data: storedRegs } = await supabase
+            .from('attendees')
+            .select('*')
+            .in('id', storedIds);
+          if (cancelled) return;
+          for (const r of (storedRegs ?? []) as Attendee[]) {
+            regMap[r.event_id] = r;
+          }
+        }
+
+        // 2. Override/fill with signed-in user's email matches
+        if (user?.email) {
+          const { data: regs } = await supabase
+            .from('attendees')
+            .select('*')
+            .ilike('email', escapeLike(user.email))
+            .in('event_id', list.map((e) => e.id));
+          if (cancelled) return;
+          for (const r of (regs ?? []) as Attendee[]) {
+            regMap[r.event_id] = r;
+          }
+        }
+
+        setMyRegs(regMap);
       })();
       return () => {
         cancelled = true;
@@ -415,9 +524,9 @@ export default function RegisterPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, viewer?.id]);
 
-  // Existing registration check + pre-fill (matched strictly by signed-in user's email)
+  // Existing registration check + pre-fill (signed-in email match first, then localStorage ticket id)
   useEffect(() => {
     if (!event) return;
     let cancelled = false;
@@ -426,22 +535,50 @@ export default function RegisterPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (cancelled) return;
-      if (user) {
-        if (user.email) {
-          const { data: existing } = await supabase
+      setIsSignedIn(Boolean(user));
+
+      let existing: Attendee | null = null;
+
+      if (user?.email) {
+        const { data } = await supabase
+          .from('attendees')
+          .select('*')
+          .eq('event_id', event.id)
+          .ilike('email', escapeLike(user.email))
+          .limit(1)
+          .maybeSingle();
+        existing = (data as Attendee | null) ?? null;
+      }
+
+      if (!existing) {
+        const storedId = readStoredTicketId(event.id);
+        if (storedId) {
+          const { data } = await supabase
             .from('attendees')
             .select('*')
+            .eq('id', storedId)
             .eq('event_id', event.id)
-            .ilike('email', user.email)
-            .limit(1)
             .maybeSingle();
-          if (cancelled) return;
-          if (existing) {
-            setConfirmed(existing as Attendee);
-            setCheckingRegistration(false);
-            return;
-          }
+          existing = (data as Attendee | null) ?? null;
         }
+      }
+      if (cancelled) return;
+
+      if (existing) {
+        writeStoredTicketId(event.id, existing.id);
+        setExistingReg(existing);
+        setConfirmed(existing);
+        setValues({
+          full_name: existing.full_name,
+          email: existing.email,
+          organization: existing.organization,
+          contact_number: existing.contact_number,
+        });
+        setCheckingRegistration(false);
+        return;
+      }
+
+      if (user) {
         setValues((prev) => ({
           ...prev,
           email: prev.email || user.email || '',
@@ -454,7 +591,7 @@ export default function RegisterPage() {
     return () => {
       cancelled = true;
     };
-  }, [event]);
+  }, [event, viewer?.id]);
 
   const handleChange =
     (field: keyof FormValues) => (e: ChangeEvent<HTMLInputElement>) => {
@@ -477,6 +614,7 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     setSubmitError(null);
+    setDuplicateAttempt(false);
 
     const payload = {
       event_id: event.id,
@@ -507,6 +645,7 @@ export default function RegisterPage() {
     }
 
     if (created) {
+      writeStoredTicketId(event.id, created.id);
       setConfirmed(created);
       if (created.status === 'approved') {
         const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
@@ -517,6 +656,7 @@ export default function RegisterPage() {
         }
       }
     } else {
+      setDuplicateAttempt(failure?.code === '23505');
       setSubmitError(
         failure?.code === '23505'
           ? 'You’re already registered for this event with this email. Check your inbox for your pass, or sign in with the email you registered with.'
@@ -526,8 +666,20 @@ export default function RegisterPage() {
     setSubmitting(false);
   };
 
+  const handleSignInRedirect = () => {
+    try {
+      window.sessionStorage.setItem(AUTH_REDIRECT_KEY, window.location.pathname);
+    } catch {
+      /* storage unavailable */
+    }
+    goTo('/');
+  };
+
   const handleReset = () => {
+    if (event) clearStoredTicketId(event.id);
     setConfirmed(null);
+    setExistingReg(null);
+    setDuplicateAttempt(false);
     setValues(EMPTY_FORM);
     setTouched({});
     setSubmitError(null);
@@ -545,7 +697,7 @@ export default function RegisterPage() {
 
   if (!slug) {
     return (
-      <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 sm:pt-20 lg:px-10 lg:pb-16 lg:pt-20">
+      <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16">
         <div className="mx-auto max-w-6xl">
           <motion.header
             initial={{ opacity: 0, y: -10 }}
@@ -583,9 +735,11 @@ export default function RegisterPage() {
               </p>
             </div>
           ) : (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
               {publicEvents.map((ev, i) => {
                 const d = formatEventDate(ev.event_date);
+                const reg = myRegs[ev.id];
+                const regMeta = reg ? REG_STATUS_META[reg.status] : null;
                 return (
                   <motion.button
                     key={ev.id}
@@ -596,28 +750,38 @@ export default function RegisterPage() {
                     whileHover={{ y: -4 }}
                     whileTap={{ scale: 0.98 }}
                     transition={{ duration: 0.4, delay: i * 0.05 }}
-                    className="liquid-glass group flex flex-col p-6 text-left"
+                    className="liquid-glass group flex min-w-0 flex-col overflow-hidden p-6 text-left"
                   >
-                    <h2 className="text-xl font-extrabold leading-tight tracking-tight text-[#18181B]">
+                    {regMeta && (
+                      <span
+                        className={`mb-3 inline-flex max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1 text-[11px] font-bold ${regMeta.badge}`}
+                      >
+                        <regMeta.Icon size={12} className="shrink-0" />
+                        <span className="truncate">{regMeta.label}</span>
+                      </span>
+                    )}
+                    <h2 className="break-words text-xl font-extrabold leading-tight tracking-tight text-[#18181B]">
                       {ev.title}
                     </h2>
                     {ev.description && (
-                      <p className="mt-2 line-clamp-2 text-sm font-medium text-[#18181B]/60">
+                      <p className="mt-2 line-clamp-2 break-words text-sm font-medium text-[#18181B]/60">
                         {ev.description}
                       </p>
                     )}
                     <div className="mt-5 space-y-2.5 text-sm font-semibold text-[#18181B]/75">
-                      <p className="flex items-center gap-2.5">
+                      <p className="flex min-w-0 items-center gap-2.5">
                         <CalendarDays size={16} className="shrink-0 text-violet-600" />
-                        {d.day} · {d.time}
+                        <span className="min-w-0 break-words">
+                          {d.day} · {d.time}
+                        </span>
                       </p>
-                      <p className="flex items-center gap-2.5">
+                      <p className="flex min-w-0 items-center gap-2.5">
                         <MapPin size={16} className="shrink-0 text-violet-600" />
-                        <span className="truncate">{ev.venue}</span>
+                        <span className="min-w-0 truncate">{ev.venue}</span>
                       </p>
                     </div>
-                    <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-bold text-[#18181B]">
-                      Register
+                    <span className="liquid-btn-primary mt-6 inline-flex w-full items-center justify-center gap-1.5 px-5 text-sm sm:w-auto sm:self-start">
+                      {reg ? 'View My Pass' : 'Register'}
                       <ArrowRight
                         size={16}
                         className="transition-transform group-hover:translate-x-1"
@@ -665,6 +829,7 @@ export default function RegisterPage() {
   const isClosed = event.status === 'closed';
   const isCancelled = event.status === 'cancelled';
   const registrationLocked = isClosed || isCancelled;
+  const existingMeta = existingReg ? REG_STATUS_META[existingReg.status] : null;
 
   const previewAttendee: Attendee = {
     id: 'preview',
@@ -681,7 +846,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 sm:pt-20 lg:px-10 lg:pb-16 lg:pt-20">
+    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16">
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}
@@ -738,6 +903,23 @@ export default function RegisterPage() {
         <div className="grid items-start gap-6 lg:grid-cols-2 lg:gap-8">
           {/* ---------- Left column ---------- */}
           <div className="flex flex-col gap-6">
+            {!confirmed && !isSignedIn && (
+              <motion.button
+                type="button"
+                onClick={handleSignInRedirect}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="liquid-glass flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition hover:-translate-y-0.5"
+              >
+                <span className="flex items-center gap-2.5 text-sm font-semibold text-[#18181B]/75">
+                  <LogIn size={15} className="shrink-0 text-violet-600" />
+                  Already signed up for this event? Sign in to check status
+                </span>
+                <ArrowRight size={15} className="shrink-0 text-[#18181B]/60" />
+              </motion.button>
+            )}
+
             <motion.section
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -748,8 +930,42 @@ export default function RegisterPage() {
                 Guest details
               </h2>
               <p className="mb-6 mt-1 text-sm font-medium text-[#18181B]/60">
-                Your pass updates live as you type.
+                {existingReg
+                  ? 'Your saved registration details.'
+                  : 'Your pass updates live as you type.'}
               </p>
+
+              {existingReg && existingMeta && (
+                <div
+                  role="status"
+                  className="mb-6 flex min-w-0 flex-col gap-3 rounded-2xl border border-white/75 bg-white/55 px-4 py-3.5 backdrop-blur-xl"
+                >
+                  <div className="flex min-w-0 items-start gap-3">
+                    <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-violet-600" />
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-bold text-[#18181B]">
+                        You’re already registered for this event
+                      </p>
+                      <span
+                        className={`mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${existingMeta.badge}`}
+                      >
+                        <existingMeta.Icon size={12} className="shrink-0" />
+                        <span className="truncate">{existingMeta.label}</span>
+                      </span>
+                    </div>
+                  </div>
+                  {isSignedIn && (
+                    <button
+                      type="button"
+                      onClick={() => goTo('/my-passes')}
+                      className="liquid-btn-primary inline-flex w-full items-center justify-center gap-2 px-5 text-sm sm:w-auto sm:self-start"
+                    >
+                      View in My Passes
+                      <ArrowRight size={16} />
+                    </button>
+                  )}
+                </div>
+              )}
 
               {registrationLocked && (
                 <div
@@ -780,7 +996,7 @@ export default function RegisterPage() {
 
               <form onSubmit={handleSubmit} noValidate>
                 <fieldset
-                  disabled={registrationLocked}
+                  disabled={registrationLocked || existingReg !== null}
                   className="m-0 min-w-0 space-y-5 border-0 p-0 disabled:opacity-60"
                 >
                   <Field
@@ -864,6 +1080,17 @@ export default function RegisterPage() {
                       </>
                     )}
                   </button>
+
+                  {duplicateAttempt && !isSignedIn && (
+                    <button
+                      type="button"
+                      onClick={handleSignInRedirect}
+                      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#18181B] px-6 text-sm font-bold text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_10px_24px_-8px_rgba(24,24,27,0.5)] transition-transform hover:-translate-y-0.5 active:scale-[0.97]"
+                    >
+                      <LogIn size={16} />
+                      Sign In to Check Status
+                    </button>
+                  )}
                 </fieldset>
               </form>
             </motion.section>
@@ -925,7 +1152,7 @@ export default function RegisterPage() {
                         A copy will be sent to {confirmed.email}
                       </p>
                     )}
-                    {!registrationLocked && (
+                    {!registrationLocked && !existingReg && (
                       <button
                         type="button"
                         onClick={handleReset}

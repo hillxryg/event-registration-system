@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   AlertCircle,
   ArrowRight,
   CalendarDays,
+  Check,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Globe,
-  LayoutDashboard,
   Loader2,
   Lock,
-  LogOut,
   MapPin,
   QrCode,
   RefreshCw,
+  SlidersHorizontal,
   Ticket,
-  User,
   X,
   XCircle,
 } from 'lucide-react';
@@ -100,7 +100,7 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ duration: 0.4, delay: Math.min(index, 6) * 0.05 }}
-      className="liquid-glass flex flex-col p-6"
+      className="liquid-glass flex min-w-0 flex-col overflow-hidden p-6"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span
@@ -127,35 +127,35 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
         )}
       </div>
 
-      <h2 className="mt-4 text-xl font-extrabold leading-tight tracking-tight text-[#18181B]">
+      <h2 className="mt-4 break-words text-xl font-extrabold leading-tight tracking-tight text-[#18181B]">
         {ev.title}
       </h2>
 
       <div className="mt-4 space-y-2.5 text-sm font-semibold text-[#18181B]/75">
-        <p className="flex items-center gap-2.5">
+        <p className="flex min-w-0 items-center gap-2.5">
           <CalendarDays size={16} className="shrink-0 text-violet-600" />
-          {formatWhen(ev.event_date)}
+          <span className="min-w-0 break-words">{formatWhen(ev.event_date)}</span>
         </p>
-        <p className="flex items-center gap-2.5">
+        <p className="flex min-w-0 items-center gap-2.5">
           <MapPin size={16} className="shrink-0 text-violet-600" />
-          <span className="truncate">{ev.venue}</span>
+          <span className="min-w-0 truncate">{ev.venue}</span>
         </p>
       </div>
 
-      <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl bg-white/50 px-4 py-3">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-[#18181B]/50">
+      <div className="mt-5 flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-white/50 px-4 py-3">
+        <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-[#18181B]/50">
           Ticket code
         </span>
-        <span className="truncate font-mono text-sm font-semibold tracking-[0.14em] text-[#18181B]">
+        <span className="min-w-0 truncate font-mono text-sm font-semibold tracking-[0.14em] text-[#18181B]">
           {row.ticket_code}
         </span>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-2">
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <button
           type="button"
           onClick={onViewPass}
-          className="liquid-btn-primary inline-flex items-center gap-2 px-5 text-sm"
+          className="liquid-btn-primary inline-flex w-full items-center justify-center gap-2 px-5 text-sm sm:w-auto"
         >
           <QrCode size={16} />
           View QR Pass
@@ -166,7 +166,7 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
             type="button"
             onClick={() => setConfirming(true)}
             disabled={cancelling}
-            className={`${pillBase} ${pillIdle} h-11 px-4 text-rose-700 disabled:opacity-60`}
+            className={`${pillBase} ${pillIdle} h-11 w-full justify-center px-4 text-rose-700 disabled:opacity-60 sm:w-auto`}
           >
             Cancel Attendance
           </button>
@@ -187,7 +187,7 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
               <p className="mt-0.5 text-xs font-medium text-rose-800/80">
                 Your QR pass will stop working. This can’t be undone from here.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
                   disabled={cancelling}
@@ -195,7 +195,7 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
                     await onCancel();
                     setConfirming(false);
                   }}
-                  className="inline-flex h-10 items-center gap-2 rounded-full bg-rose-600 px-4 text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-60"
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-rose-600 px-4 text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-60 sm:w-auto"
                 >
                   {cancelling && <Loader2 size={14} className="animate-spin" />}
                   Yes, cancel
@@ -204,7 +204,7 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
                   type="button"
                   disabled={cancelling}
                   onClick={() => setConfirming(false)}
-                  className={`${pillBase} ${pillIdle} h-10 px-4`}
+                  className={`${pillBase} ${pillIdle} h-10 w-full justify-center px-4 sm:w-auto`}
                 >
                   Keep my spot
                 </button>
@@ -333,7 +333,7 @@ interface GuestDashboardPageProps {
   onSignOut: () => void | Promise<void>;
 }
 
-export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPageProps) {
+export default function GuestDashboardPage({ user }: GuestDashboardPageProps) {
   const [rows, setRows] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -341,6 +341,24 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
   const [filter, setFilter] = useState<FilterKey>('all');
   const [passId, setPassId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!filterMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!filterMenuRef.current?.contains(e.target as Node)) setFilterMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFilterMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [filterMenuOpen]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -383,6 +401,7 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
     [rows, filter],
   );
 
+  const activeFilter = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
   const activePass = useMemo(() => rows.find((r) => r.id === passId) ?? null, [rows, passId]);
   const closePass = useCallback(() => setPassId(null), []);
 
@@ -410,7 +429,7 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
   };
 
   return (
-    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-6 sm:px-6 lg:px-10 lg:pb-16">
+    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16">
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}
@@ -418,34 +437,10 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
           transition={{ duration: 0.5 }}
           className="mb-8 lg:mb-10"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
-              <Ticket size={12} />
-              My Passes
-            </span>
-            <div className="flex max-w-full items-center gap-2 rounded-full border border-white/75 bg-white/55 px-3 py-1.5 text-xs font-semibold text-[#18181B] shadow-sm backdrop-blur-xl">
-              <User size={14} className="shrink-0 text-violet-600" />
-              <span className="max-w-[140px] truncate sm:max-w-[240px]">{user.email}</span>
-              {user.role === 'admin' && (
-                <button
-                  type="button"
-                  onClick={() => goTo('/admin')}
-                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
-                >
-                  <LayoutDashboard size={12} />
-                  Dashboard
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void onSignOut()}
-                className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#18181B] px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
-              >
-                <LogOut size={12} />
-                Sign Out
-              </button>
-            </div>
-          </div>
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
+            <Ticket size={12} />
+            My Passes
+          </span>
           <h1 className="mt-6 text-3xl font-extrabold tracking-tight text-[#18181B] sm:text-4xl lg:text-5xl">
             Your event passes.
           </h1>
@@ -454,8 +449,82 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
           </p>
         </motion.header>
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Filter passes">
+        <div className="mb-6 flex items-center justify-between gap-2 sm:flex-wrap sm:gap-3">
+          {/* Mobile filter dropdown */}
+          <div ref={filterMenuRef} className="relative z-30 min-w-0 flex-1 sm:hidden">
+            <button
+              type="button"
+              onClick={() => setFilterMenuOpen((o) => !o)}
+              aria-haspopup="listbox"
+              aria-expanded={filterMenuOpen}
+              aria-label="Filter passes"
+              className="liquid-glass flex h-11 w-full min-w-0 items-center gap-2 rounded-full px-3.5 text-xs font-bold text-[#18181B]"
+            >
+              <SlidersHorizontal size={14} className="shrink-0 text-violet-600" />
+              <span className="min-w-0 flex-1 truncate text-left">{activeFilter.label}</span>
+              <span className="shrink-0 font-mono text-[10px] text-[#18181B]/50">
+                {counts[activeFilter.key]}
+              </span>
+              <ChevronDown
+                size={14}
+                className={`shrink-0 transition-transform ${filterMenuOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            <AnimatePresence>
+              {filterMenuOpen && (
+                <motion.div
+                  role="listbox"
+                  aria-label="Filter passes"
+                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                  transition={{ duration: 0.18 }}
+                  className="liquid-glass absolute left-0 top-full z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] origin-top-left p-1.5"
+                >
+                  {FILTERS.map((f) => {
+                    const active = filter === f.key;
+                    return (
+                      <button
+                        key={f.key}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => {
+                          setFilter(f.key);
+                          setFilterMenuOpen(false);
+                        }}
+                        className={`flex w-full items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-left text-sm font-bold transition ${
+                          active
+                            ? 'bg-[#18181B] text-white'
+                            : 'text-[#18181B]/80 hover:bg-white/60'
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{f.label}</span>
+                        <span
+                          className={`shrink-0 font-mono text-[11px] ${
+                            active ? 'text-white/70' : 'text-[#18181B]/45'
+                          }`}
+                        >
+                          {counts[f.key]}
+                        </span>
+                        <span className="flex size-4 shrink-0 items-center justify-center">
+                          {active && <Check size={14} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Tablet / desktop filter pills */}
+          <div
+            className="hidden flex-wrap items-center gap-2 sm:flex"
+            role="tablist"
+            aria-label="Filter passes"
+          >
             {FILTERS.map((f) => (
               <button
                 key={f.key}
@@ -480,10 +549,11 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
               </button>
             ))}
           </div>
+
           <button
             type="button"
             onClick={() => goTo('/register')}
-            className="liquid-btn-primary inline-flex items-center gap-2 px-5 text-sm"
+            className="liquid-btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 text-sm sm:px-5"
           >
             Browse Public Events
             <ArrowRight size={16} />
@@ -559,7 +629,7 @@ export default function GuestDashboardPage({ user, onSignOut }: GuestDashboardPa
             </p>
           </div>
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
             <AnimatePresence initial={false}>
               {visibleRows.map((row, i) => (
                 <RegistrationCard
