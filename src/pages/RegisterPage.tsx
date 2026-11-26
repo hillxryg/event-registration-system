@@ -417,7 +417,7 @@ export default function RegisterPage() {
     };
   }, [slug]);
 
-  // Existing registration check + pre-fill
+  // Existing registration check + pre-fill (matched strictly by signed-in user's email)
   useEffect(() => {
     if (!event) return;
     let cancelled = false;
@@ -427,17 +427,20 @@ export default function RegisterPage() {
       } = await supabase.auth.getUser();
       if (cancelled) return;
       if (user) {
-        const { data: existing } = await supabase
-          .from('attendees')
-          .select('*')
-          .eq('event_id', event.id)
-          .limit(1)
-          .maybeSingle();
-        if (cancelled) return;
-        if (existing) {
-          setConfirmed(existing as Attendee);
-          setCheckingRegistration(false);
-          return;
+        if (user.email) {
+          const { data: existing } = await supabase
+            .from('attendees')
+            .select('*')
+            .eq('event_id', event.id)
+            .ilike('email', user.email)
+            .limit(1)
+            .maybeSingle();
+          if (cancelled) return;
+          if (existing) {
+            setConfirmed(existing as Attendee);
+            setCheckingRegistration(false);
+            return;
+          }
         }
         setValues((prev) => ({
           ...prev,
@@ -506,7 +509,12 @@ export default function RegisterPage() {
     if (created) {
       setConfirmed(created);
       if (created.status === 'approved') {
-        // TODO: Phase 4 — invoke send-ticket-email Edge Function
+        const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
+          body: { attendee_id: created.id },
+        });
+        if (fnError) {
+          setSubmitError(`Pass generated, but email failed: ${fnError.message}`);
+        }
       }
     } else {
       setSubmitError(

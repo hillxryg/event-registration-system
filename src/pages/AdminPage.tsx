@@ -654,7 +654,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, status } : e)));
   };
 
-  const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
+ const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
     const { error } = await supabase.from('attendees').update({ status }).eq('id', id);
     if (error) {
       setError(error.message);
@@ -662,7 +662,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     }
     setAttendees((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
     if (status === 'approved') {
-      // TODO: Phase 4 — trigger send-ticket-email Edge Function on approve
+      const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
+        body: { attendee_id: id },
+      });
+      if (fnError) {
+        setError('Attendee approved, but the ticket email failed to send.');
+      }
     }
   };
 

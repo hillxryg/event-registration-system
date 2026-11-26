@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, LogOut, User } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, User } from 'lucide-react';
 import type { UserProfile } from './types/database';
 import { supabase, fetchUserProfile } from './lib/supabase';
 import AuthPage from './pages/AuthPage';
@@ -100,32 +100,42 @@ export default function App() {
   }
 
   if (path === '/register' || path.startsWith('/register/')) {
-    if (!currentUser) {
-      return <AuthPage onAuthSuccess={handleAuthSuccess} />;
-    }
     return (
       <div className="relative">
         <div className="fixed right-4 top-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-white/75 bg-white/55 px-3 py-1.5 text-xs font-semibold text-[#18181B] shadow-sm backdrop-blur-xl">
-          <User size={14} className="shrink-0 text-violet-600" />
-          <span className="max-w-[110px] truncate sm:max-w-[160px]">{currentUser.email}</span>
-          {currentUser.role === 'admin' && (
+          {currentUser ? (
+            <>
+              <User size={14} className="shrink-0 text-violet-600" />
+              <span className="max-w-[110px] truncate sm:max-w-[160px]">{currentUser.email}</span>
+              {currentUser.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/admin')}
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
+                >
+                  <ArrowLeft size={12} />
+                  Dashboard
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#18181B] px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
+              >
+                <LogOut size={12} />
+                Sign Out
+              </button>
+            </>
+          ) : (
             <button
               type="button"
-              onClick={() => navigateTo('/admin')}
-              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
+              onClick={() => navigateTo('/')}
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[#18181B] px-3 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
             >
-              <ArrowLeft size={12} />
-              Dashboard
+              <LogIn size={12} />
+              Sign In
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#18181B] px-2.5 py-1 text-[11px] font-bold text-white transition hover:opacity-90"
-          >
-            <LogOut size={12} />
-            Sign Out
-          </button>
         </div>
         <RegisterPage />
       </div>
