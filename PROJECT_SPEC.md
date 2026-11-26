@@ -2,36 +2,29 @@
 
 ## Current Project Phase
 - **Completed:**
-  - Phase 1: Architecture, Supabase Schema (`supabase/schema.sql`), TypeScript Contracts (`src/types/database.ts`), Local Vite Scaffold
-  - Phase 2A: Liquid-Glass Design System (`src/index.css`) & Guest Registration Page (`src/pages/RegisterPage.tsx`)
-  - Phase 2B: Auth Login/Signup (`src/pages/AuthPage.tsx`), Gate Scanner (`src/pages/ScannerPage.tsx`), Admin Dashboard (`src/pages/AdminPage.tsx`), & Role-Based Routing (`src/App.tsx`)
-  - Phase 3A: Supabase Client (`src/lib/supabase.ts`), Real Supabase Auth + Profile Role Redirect (`src/pages/AuthPage.tsx`, `src/App.tsx`)
-- **Active:** Phase 3B — Wire Live Supabase Database Queries & RPC into `src/pages/RegisterPage.tsx`, `src/pages/ScannerPage.tsx`, and `src/pages/AdminPage.tsx`
+  - Phase 1–3B: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Mobile Hamburger Menu & Glass Event Dropdown
+- **Active:** Phase 3C — Event Visibility (`public` vs `exclusive`), Shareable `/register/:slug` Invite Links, Public Events Directory (`/register` without slug), & Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`)
 - **Upcoming:**
-  - Phase 4: Supabase Edge Function + Resend Automated HTML QR Ticket Email
+  - Phase 4: Supabase Edge Function + Resend Automated HTML QR Ticket Email (triggered on instant public approval or when admin approves a pending exclusive guest)
   - Phase 5: End-to-End Testing & Deployment
 
 ## Current File Tree
 ```text
 event-checkin/
-├── public/
 ├── src/
 │   ├── lib/
-│   │   └── supabase.ts       # Completed (Phase 3A) — Exports `supabase` and `fetchUserProfile`
+│   │   └── supabase.ts       # Exports `supabase` and `fetchUserProfile`
 │   ├── pages/
-│   │   ├── AuthPage.tsx      # Completed (Phase 3A) — Real Supabase signInWithPassword / signUp
-│   │   ├── RegisterPage.tsx  # Target (Phase 3B) — Needs live event fetch & attendee insert
-│   │   ├── ScannerPage.tsx   # Target (Phase 3B) — Needs live event lookup & verify_and_checkin RPC
-│   │   └── AdminPage.tsx     # Target (Phase 3B) — Needs live events/attendees CRUD
+│   │   ├── AuthPage.tsx      # Real Supabase signInWithPassword / signUp
+│   │   ├── RegisterPage.tsx  # Target (Phase 3C) — Needs Public Events Directory (when no :slug) + Pending Approval pass state for exclusive events
+│   │   ├── ScannerPage.tsx   # Live verify_and_checkin RPC
+│   │   └── AdminPage.tsx     # Target (Phase 3C) — Needs Public/Exclusive selector, Copy Invite Link button, & Approve/Decline actions for pending guests
 │   ├── types/
-│   │   └── database.ts       # Source-of-truth TypeScript interfaces
-│   ├── App.tsx               # Completed (Phase 3A) — Real Supabase session & role routing
-│   ├── index.css             # Completed (Phase 2A)
-│   └── main.tsx
+│   │   └── database.ts       # UserRole, EventVisibility, RegistrationStatus, UserProfile, EventItem, Attendee, CheckInResponse
+│   ├── App.tsx               # Target (Phase 3C) — Preserve intended `/register/:slug` path after login
+│   └── index.css             # .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
 ├── supabase/
-│   └── schema.sql            # PostgreSQL tables (profiles, events, attendees), RLS policies, verify_and_checkin RPC
-├── .env.local
-├── package.json
+│   └── schema.sql
 └── PROJECT_SPEC.md
 ```
 
@@ -41,26 +34,17 @@ event-checkin/
 - QR Packages: qrcode.react (QRCodeSVG for client-side ticket rendering) + html5-qrcode(camera scanner)
 - Backend & Database: Supabase (PostgreSQL, Auth, Edge Functions) + Resend API (automated HTML emails)
 
-## Routes & Role-Based Flow
-- / or /login (AuthPage.tsx): Default landing screen. Visitors sign in or create an account (guest or admin mock role selector for testing; Phase 3 reads profiles.role).
--- If role === 'admin' -> redirects to /admin (AdminPage.tsx).
--- If role === 'guest' -> redirects to /register (RegisterPage.tsx).
-- /register or /register/:slug (RegisterPage.tsx): Protected guest registration & digital QR pass view (includes top-right user badge + Sign Out button).
-- /scanner or /scanner/:slug (ScannerPage.tsx): PIN-unlocked gate staff camera QR scanner (verify_and_checkin RPC).
-- /admin (AdminPage.tsx): Admin-only event & attendee management dashboard (includes Sign Out button).
-
 ## Visual Design Tokens (Already defined in src/index.css)
 - Mesh Gradient Colors: Vanilla Cream #F6E9CC, Baby Blue #D0E7F6, Cotton Candy #F0C9EF, Rose Quartz #F1C9CF, Lavender #BBAEEC
 - Available CSS Classes: .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
 - QR Safe Zone: Always render QRCodeSVG inside a solid pure-white rounded square (bg-white p-4 rounded-2xl).
 
-## Data Contracts (`src/types/database.ts`)
-- `UserRole`: `'guest' | 'admin'`
-- `UserProfile`: `{ id: string; email: string; full_name: string | null; role: UserRole; created_at: string; }`
-- `EventItem`: `{ id: string; slug: string; title: string; description: string | null; event_date: string; venue: string; scanner_pin?: string; is_active: boolean; created_at: string; }`
-- `Attendee`: `{ id: string; event_id: string; ticket_code: string; full_name: string; email: string; organization: string; contact_number: string; checked_in: boolean; checked_in_at: string | null; created_at: string; }`
-- `CheckInStatus`: `'valid' | 'already_checked_in' | 'invalid' | 'unauthorized'`
-- `CheckInResponse`: `{ status: CheckInStatus; message?: string; checked_in_at?: string; attendee?: Attendee; }`
+## Updated Data Contracts (src/types/database.ts)
+- UserRole: 'guest' | 'admin'
+- EventVisibility: 'public' | 'exclusive'
+- RegistrationStatus: 'approved' | 'pending' | 'declined'
+- EventItem: { id, slug, title, description, event_date, venue, visibility, scanner_pin?, is_active, created_at }
+- Attendee: { id, event_id, ticket_code, full_name, email, organization, contact_number, status, checked_in, checked_in_at, created_at }
 
 ## Strict Restrictions & Guardrails (Mandatory)
 

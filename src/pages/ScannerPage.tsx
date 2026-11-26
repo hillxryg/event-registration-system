@@ -32,6 +32,19 @@ const goBackToDashboard = () => {
   window.dispatchEvent(new PopStateEvent('popstate'));
 };
 
+function BackToDashboardButton() {
+  return (
+    <button
+      type="button"
+      onClick={goBackToDashboard}
+      className="liquid-glass fixed left-4 top-4 z-40 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white/60"
+    >
+      <ArrowLeft size={14} />
+      Dashboard
+    </button>
+  );
+}
+
 type ScanState = 'ready' | 'valid' | 'already_checked_in' | 'invalid';
 
 const STATUS_STYLE: Record<ScanState, { label: string; cls: string; Icon: typeof ScanLine }> = {
@@ -209,7 +222,8 @@ export default function ScannerPage() {
   /* ---------------- PIN GATE ---------------- */
   if (!unlocked) {
     return (
-      <div className="pastel-mesh-bg min-h-screen flex items-center justify-center p-4">
+      <div className="pastel-mesh-bg min-h-screen flex items-center justify-center p-4 pt-16">
+        <BackToDashboardButton />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -281,7 +295,8 @@ export default function ScannerPage() {
   const attendee = result?.attendee;
 
   return (
-    <div className="pastel-mesh-bg min-h-screen p-4">
+    <div className="pastel-mesh-bg min-h-screen p-4 pt-16">
+      <BackToDashboardButton />
       <div className="mx-auto flex max-w-md flex-col gap-4">
         {/* Status pill */}
         <AnimatePresence mode="wait">

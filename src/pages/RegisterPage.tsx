@@ -4,17 +4,22 @@ import { AnimatePresence, motion } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowRight,
   Building2,
   CalendarDays,
   CheckCircle2,
+  Clock,
+  Globe,
   Loader2,
+  Lock,
   Mail,
   MapPin,
   Phone,
   RotateCcw,
   Ticket,
   User,
+  XCircle,
 } from 'lucide-react';
 import type { Attendee, EventItem } from '../types/database';
 import { supabase } from '../lib/supabase';
@@ -23,6 +28,9 @@ const getSlugFromPath = (): string | null => {
   const [, , slug] = window.location.pathname.split('/');
   return slug ? decodeURIComponent(slug) : null;
 };
+
+const EVENT_COLUMNS =
+  'id, slug, title, description, event_date, venue, visibility, is_active, created_at';
 
 type FormValues = Pick<
   Attendee,
@@ -171,6 +179,9 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
   const hasName = attendee.full_name.trim().length > 0;
   const hasOrg = attendee.organization.trim().length > 0;
   const hasPhone = attendee.contact_number.trim().length > 0;
+  const isApproved = confirmed && attendee.status === 'approved';
+  const isPending = confirmed && attendee.status === 'pending';
+  const isDeclined = confirmed && attendee.status === 'declined';
 
   return (
     <div className="liquid-glass overflow-hidden">
@@ -179,7 +190,13 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-[#18181B]/60">
-              {confirmed ? 'Confirmed Pass' : 'Live Preview'}
+              {isApproved
+                ? 'Confirmed Pass'
+                : isPending
+                  ? 'Pending Approval'
+                  : isDeclined
+                    ? 'Registration Declined'
+                    : 'Live Preview'}
             </p>
             <h2 className="mt-1.5 text-2xl font-extrabold leading-tight tracking-tight text-[#18181B]">
               {event.title}
@@ -187,10 +204,24 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
           </div>
           <span
             className={`flex size-11 shrink-0 items-center justify-center rounded-full shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)] ${
-              confirmed ? 'bg-emerald-500 text-white' : 'bg-white/80 text-[#18181B]'
+              isApproved
+                ? 'bg-emerald-500 text-white'
+                : isPending
+                  ? 'bg-amber-400 text-white'
+                  : isDeclined
+                    ? 'bg-rose-500 text-white'
+                    : 'bg-white/80 text-[#18181B]'
             }`}
           >
-            {confirmed ? <CheckCircle2 size={22} /> : <Ticket size={20} />}
+            {isApproved ? (
+              <CheckCircle2 size={22} />
+            ) : isPending ? (
+              <Clock size={20} />
+            ) : isDeclined ? (
+              <XCircle size={22} />
+            ) : (
+              <Ticket size={20} />
+            )}
           </span>
         </div>
         <p className="mt-3 text-sm font-medium text-[#18181B]/70">
@@ -250,45 +281,70 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
         </div>
 
         {/* QR safe zone */}
-        <div className="flex flex-col items-center gap-3 pt-1">
-          <div
-            className={`relative rounded-2xl bg-white p-4 shadow-[0_12px_28px_-10px_rgba(24,24,27,0.25)] transition-all duration-500 ${
-              confirmed ? '' : 'opacity-60'
-            }`}
-          >
-            <div className={confirmed ? '' : 'blur-[3px]'}>
-              <QRCodeSVG
-                value={attendee.ticket_code}
-                size={168}
-                level="M"
-                bgColor="#FFFFFF"
-                fgColor="#18181B"
-              />
-            </div>
-            {!confirmed && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="rounded-full bg-[#18181B] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-white">
-                  Pending
-                </span>
-              </div>
-            )}
+        {isDeclined ? (
+          <div className="flex flex-col items-center gap-3 pt-1">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100/90 px-3.5 py-1.5 text-xs font-bold text-rose-700">
+              <XCircle size={13} />
+              Registration Declined
+            </span>
+            <p className="text-center text-xs font-medium text-[#18181B]/60">
+              The organizer couldn’t approve your registration for this event, so no QR pass was
+              issued.
+            </p>
           </div>
-          <p className="font-mono text-sm font-semibold tracking-[0.2em] text-[#18181B]">
-            {confirmed ? attendee.ticket_code : '— — — — — — — —'}
-          </p>
-          <p className="text-center text-xs font-medium text-[#18181B]/55">
-            {confirmed
-              ? 'Present this QR code at the gate for check-in.'
-              : 'Your QR pass unlocks once you register.'}
-          </p>
-        </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 pt-1">
+            <div
+              className={`relative rounded-2xl bg-white p-4 shadow-[0_12px_28px_-10px_rgba(24,24,27,0.25)] transition-all duration-500 ${
+                isApproved ? '' : 'opacity-60'
+              }`}
+            >
+              <div className={isApproved ? '' : 'blur-[3px]'}>
+                <QRCodeSVG
+                  value={isApproved ? attendee.ticket_code : 'LOCKED'}
+                  size={168}
+                  level="M"
+                  bgColor="#FFFFFF"
+                  fgColor="#18181B"
+                />
+              </div>
+              {!isApproved && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#18181B] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-white">
+                    {isPending && <Lock size={11} />}
+                    {isPending ? 'Locked' : 'Pending'}
+                  </span>
+                </div>
+              )}
+            </div>
+            {isPending && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/90 px-3.5 py-1.5 text-xs font-bold text-amber-700">
+                <Clock size={13} />
+                Waiting for Admin Approval
+              </span>
+            )}
+            <p className="font-mono text-sm font-semibold tracking-[0.2em] text-[#18181B]">
+              {isApproved ? attendee.ticket_code : '— — — — — — — —'}
+            </p>
+            <p className="text-center text-xs font-medium text-[#18181B]/55">
+              {isApproved
+                ? 'Present this QR code at the gate for check-in.'
+                : isPending
+                  ? `Your request is under review. Once approved by the organizer, your QR pass and confirmation will be sent to ${attendee.email}.`
+                  : 'Your QR pass unlocks once you register.'}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function RegisterPage() {
+  const [slug, setSlug] = useState<string | null>(getSlugFromPath);
   const [event, setEvent] = useState<EventItem | null>(null);
+  const [publicEvents, setPublicEvents] = useState<EventItem[]>([]);
+  const [directoryLoading, setDirectoryLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checkingRegistration, setCheckingRegistration] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -303,20 +359,53 @@ export default function RegisterPage() {
     Object.entries(errors).filter(([key]) => touched[key as keyof FormValues]),
   );
 
-  // Load event (by :slug, or earliest active event)
+  // Keep :slug in sync (directory <-> event navigation uses pushState + popstate)
+  useEffect(() => {
+    const onPopState = () => setSlug(getSlugFromPath());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Load public events directory (no :slug) or a single event (:slug)
   useEffect(() => {
     let cancelled = false;
+    setEvent(null);
+    setLoadError(null);
+    setConfirmed(null);
+    setValues(EMPTY_FORM);
+    setTouched({});
+    setSubmitError(null);
+
+    if (!slug) {
+      setDirectoryLoading(true);
+      (async () => {
+        const { data, error } = await supabase
+          .from('events')
+          .select(EVENT_COLUMNS)
+          .eq('is_active', true)
+          .eq('visibility', 'public')
+          .order('event_date', { ascending: true });
+        if (cancelled) return;
+        if (error) {
+          setLoadError('We couldn’t load upcoming events. Please try again.');
+        } else {
+          setPublicEvents((data ?? []) as EventItem[]);
+        }
+        setDirectoryLoading(false);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setCheckingRegistration(true);
     (async () => {
-      const slug = getSlugFromPath();
-      const columns = 'id, slug, title, description, event_date, venue, is_active, created_at';
-      const base = supabase.from('events').select(columns);
-      const { data, error } = slug
-        ? await base.eq('slug', slug).eq('is_active', true).single()
-        : await base
-            .eq('is_active', true)
-            .order('event_date', { ascending: true })
-            .limit(1)
-            .single();
+      const { data, error } = await supabase
+        .from('events')
+        .select(EVENT_COLUMNS)
+        .eq('slug', slug)
+        .eq('is_active', true)
+        .single();
       if (cancelled) return;
       if (error || !data) {
         setLoadError('We couldn’t find an active event for this link.');
@@ -327,7 +416,7 @@ export default function RegisterPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [slug]);
 
   // Existing registration check + pre-fill
   useEffect(() => {
@@ -393,6 +482,7 @@ export default function RegisterPage() {
       email: values.email.trim(),
       organization: values.organization.trim(),
       contact_number: values.contact_number.trim(),
+      status: event.visibility === 'exclusive' ? 'pending' : 'approved',
     };
 
     let created: Attendee | null = null;
@@ -416,7 +506,9 @@ export default function RegisterPage() {
 
     if (created) {
       setConfirmed(created);
-      // TODO: Phase 4 — invoke send-ticket-email Edge Function
+      if (created.status === 'approved') {
+        // TODO: Phase 4 — invoke send-ticket-email Edge Function
+      }
     } else {
       setSubmitError(
         failure?.code === '23505'
@@ -434,6 +526,106 @@ export default function RegisterPage() {
     setSubmitError(null);
   };
 
+  const openEvent = (ev: EventItem) => {
+    window.history.pushState({}, '', `/register/${ev.slug}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
+  const backToDirectory = () => {
+    window.history.pushState({}, '', '/register');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
+  if (!slug) {
+    return (
+      <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 sm:pt-20 lg:px-10 lg:pb-16 lg:pt-20">
+        <div className="mx-auto max-w-6xl">
+          <motion.header
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="mb-8 lg:mb-12"
+          >
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
+              <Globe size={12} />
+              Public Events
+            </span>
+            <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-[#18181B] sm:text-4xl lg:text-5xl">
+              Upcoming Public Events
+            </h1>
+            <p className="mt-2 max-w-xl text-base font-medium text-[#18181B]/65">
+              Choose an event to reserve your spot and get your QR pass.
+            </p>
+          </motion.header>
+
+          {directoryLoading ? (
+            <div className="liquid-glass mx-auto flex max-w-sm flex-col items-center gap-3 p-8 text-center">
+              <Loader2 size={28} className="animate-spin text-[#18181B]/70" />
+              <p className="text-sm font-semibold text-[#18181B]/70">Loading events…</p>
+            </div>
+          ) : loadError ? (
+            <div className="liquid-glass mx-auto flex max-w-sm flex-col items-center gap-3 p-8 text-center">
+              <AlertCircle size={28} className="text-rose-600" />
+              <p className="text-sm font-semibold text-[#18181B]/80">{loadError}</p>
+            </div>
+          ) : publicEvents.length === 0 ? (
+            <div className="liquid-glass mx-auto flex max-w-sm flex-col items-center gap-3 p-8 text-center">
+              <CalendarDays size={28} className="text-[#18181B]/60" />
+              <p className="text-sm font-semibold text-[#18181B]/70">
+                No public events are open for registration right now.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {publicEvents.map((ev, i) => {
+                const d = formatEventDate(ev.event_date);
+                return (
+                  <motion.button
+                    key={ev.id}
+                    type="button"
+                    onClick={() => openEvent(ev)}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    whileHover={{ y: -4 }}
+                    whileTap={{ scale: 0.98 }}
+                    transition={{ duration: 0.4, delay: i * 0.05 }}
+                    className="liquid-glass group flex flex-col p-6 text-left"
+                  >
+                    <h2 className="text-xl font-extrabold leading-tight tracking-tight text-[#18181B]">
+                      {ev.title}
+                    </h2>
+                    {ev.description && (
+                      <p className="mt-2 line-clamp-2 text-sm font-medium text-[#18181B]/60">
+                        {ev.description}
+                      </p>
+                    )}
+                    <div className="mt-5 space-y-2.5 text-sm font-semibold text-[#18181B]/75">
+                      <p className="flex items-center gap-2.5">
+                        <CalendarDays size={16} className="shrink-0 text-violet-600" />
+                        {d.day} · {d.time}
+                      </p>
+                      <p className="flex items-center gap-2.5">
+                        <MapPin size={16} className="shrink-0 text-violet-600" />
+                        <span className="truncate">{ev.venue}</span>
+                      </p>
+                    </div>
+                    <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-bold text-[#18181B]">
+                      Register
+                      <ArrowRight
+                        size={16}
+                        className="transition-transform group-hover:translate-x-1"
+                      />
+                    </span>
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (!event || checkingRegistration) {
     return (
       <div className="pastel-mesh-bg flex min-h-screen items-center justify-center px-4">
@@ -442,6 +634,14 @@ export default function RegisterPage() {
             <>
               <AlertCircle size={28} className="text-rose-600" />
               <p className="text-sm font-semibold text-[#18181B]/80">{loadError}</p>
+              <button
+                type="button"
+                onClick={backToDirectory}
+                className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-[#18181B] px-4 py-2 text-xs font-bold text-white"
+              >
+                <ArrowLeft size={13} />
+                View Public Events
+              </button>
             </>
           ) : (
             <>
@@ -464,13 +664,14 @@ export default function RegisterPage() {
     email: values.email,
     organization: values.organization,
     contact_number: values.contact_number,
+    status: 'pending',
     checked_in: false,
     checked_in_at: null,
     created_at: new Date().toISOString(),
   };
 
   return (
-    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-20 sm:px-6 sm:pt-16 lg:px-10 lg:pb-16 lg:pt-16">
+    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 sm:pt-20 lg:px-10 lg:pb-16 lg:pt-20">
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}
@@ -478,15 +679,37 @@ export default function RegisterPage() {
           transition={{ duration: 0.5 }}
           className="mb-8 lg:mb-12"
         >
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
-            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-            Registration Open
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={backToDirectory}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/75 bg-white/45 px-3.5 py-1.5 text-xs font-bold text-[#18181B]/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl transition hover:bg-white/75"
+            >
+              <ArrowLeft size={13} />
+              All Events
+            </button>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
+              <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+              Registration Open
+            </span>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] backdrop-blur-xl ${
+                event.visibility === 'exclusive'
+                  ? 'border-amber-200/80 bg-amber-100/60 text-amber-800'
+                  : 'border-white/75 bg-white/45 text-[#18181B]/70'
+              }`}
+            >
+              {event.visibility === 'exclusive' ? <Lock size={12} /> : <Globe size={12} />}
+              {event.visibility === 'exclusive' ? 'Exclusive · Approval Required' : 'Public Event'}
+            </span>
+          </div>
           <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-[#18181B] sm:text-4xl lg:text-5xl">
             Reserve your spot.
           </h1>
           <p className="mt-2 max-w-xl text-base font-medium text-[#18181B]/65">
-            Fill in your details and get an instant QR pass for {event.title}.
+            {event.visibility === 'exclusive'
+              ? `Submit your details for ${event.title}. Your QR pass is issued once the organizer approves your request.`
+              : `Fill in your details and get an instant QR pass for ${event.title}.`}
           </p>
         </motion.header>
 
@@ -579,11 +802,11 @@ export default function RegisterPage() {
                   {submitting ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
-                      Generating pass…
+                      {event.visibility === 'exclusive' ? 'Submitting request…' : 'Generating pass…'}
                     </>
                   ) : (
                     <>
-                      Register &amp; get my pass
+                      {event.visibility === 'exclusive' ? 'Request to join' : 'Register & get my pass'}
                       <ArrowRight size={18} />
                     </>
                   )}
@@ -642,10 +865,12 @@ export default function RegisterPage() {
                 >
                   <DigitalPass event={event} attendee={confirmed} confirmed />
                   <div className="mt-5 flex flex-col items-center gap-3">
-                    <p className="flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#18181B]/70">
-                      <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
-                      A copy will be sent to {confirmed.email}
-                    </p>
+                    {confirmed.status === 'approved' && (
+                      <p className="flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#18181B]/70">
+                        <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
+                        A copy will be sent to {confirmed.email}
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={handleReset}
