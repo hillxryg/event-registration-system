@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LogOut,
@@ -9,12 +9,15 @@ import {
   UserCheck,
   Clock,
   X,
+  Check,
   ChevronDown,
+  Menu,
   ScanLine,
   Ticket,
   ShieldCheck,
 } from 'lucide-react';
 import type { UserProfile, EventItem, Attendee } from '../types/database';
+import { supabase } from '../lib/supabase';
 
 interface AdminPageProps {
   user: UserProfile;
@@ -23,65 +26,6 @@ interface AdminPageProps {
 
 type Filter = 'all' | 'checked_in' | 'pending';
 
-const now = () => new Date().toISOString();
-
-const INITIAL_EVENTS: EventItem[] = [
-  {
-    id: 'evt-1',
-    slug: 'tech-summit-2026',
-    title: 'Tech Summit 2026',
-    description: 'Annual technology conference.',
-    event_date: '2026-12-12T09:00:00Z',
-    venue: 'Manila Convention Center',
-    scanner_pin: '1234',
-    is_active: true,
-    created_at: now(),
-  },
-  {
-    id: 'evt-2',
-    slug: 'design-meetup',
-    title: 'Design Meetup',
-    description: 'Monthly design community night.',
-    event_date: '2026-12-20T18:00:00Z',
-    venue: 'Makati Hub',
-    scanner_pin: '4321',
-    is_active: true,
-    created_at: now(),
-  },
-];
-
-const mk = (
-  id: string,
-  event_id: string,
-  code: string,
-  name: string,
-  email: string,
-  org: string,
-  phone: string,
-  checked: boolean,
-): Attendee => ({
-  id,
-  event_id,
-  ticket_code: code,
-  full_name: name,
-  email,
-  organization: org,
-  contact_number: phone,
-  checked_in: checked,
-  checked_in_at: checked ? now() : null,
-  created_at: now(),
-});
-
-const INITIAL_ATTENDEES: Attendee[] = [
-  mk('a1', 'evt-1', 'TKT-1001', 'Maria Santos', 'maria@example.com', 'Lumina Labs', '+63 917 555 0101', true),
-  mk('a2', 'evt-1', 'TKT-1002', 'Jose Reyes', 'jose@example.com', 'Northwind Co.', '+63 918 555 0102', false),
-  mk('a3', 'evt-1', 'TKT-1003', 'Ana Cruz', 'ana@example.com', 'Bluepeak', '+63 919 555 0103', true),
-  mk('a4', 'evt-1', 'TKT-1004', 'Luis Garcia', 'luis@example.com', 'Orbit Studio', '+63 920 555 0104', false),
-  mk('a5', 'evt-1', 'TKT-1005', 'Carla Mendoza', 'carla@example.com', 'Lumina Labs', '+63 921 555 0105', false),
-  mk('a6', 'evt-2', 'TKT-2001', 'Paolo Dizon', 'paolo@example.com', 'Pixel Forge', '+63 922 555 0106', false),
-  mk('a7', 'evt-2', 'TKT-2002', 'Bea Tan', 'bea@example.com', 'Studio Tan', '+63 923 555 0107', true),
-];
-
 const navigate = (path: string) => {
   window.history.pushState({}, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
@@ -89,30 +33,180 @@ const navigate = (path: string) => {
 
 const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
 
+const formatEventMeta = (e: EventItem) =>
+  `${new Date(e.event_date).toLocaleDateString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })} · ${e.venue}`;
+
+interface EventDropdownProps {
+  events: EventItem[];
+  selectedId: string;
+  loading: boolean;
+  onSelect: (id: string) => void;
+  className?: string;
+}
+
+function EventDropdown({ events, selectedId, loading, onSelect, className = '' }: EventDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const selected = events.find((e) => e.id === selectedId);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className={`relative ${className}`}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Switch event"
+        className="liquid-glass flex w-full items-center gap-2 rounded-full py-2 pl-4 pr-3 text-sm font-medium text-slate-700 transition hover:bg-white/60"
+      >
+        <span className="min-w-0 flex-1 truncate text-left">
+          {loading ? 'Loading events…' : (selected?.title ?? 'No events yet')}
+        </span>
+        <motion.span animate={{ rotate: open ? 180 : 0 }} className="shrink-0 text-slate-500">
+          <ChevronDown size={16} />
+        </motion.span>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="listbox"
+            aria-label="Events"
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="liquid-glass absolute left-0 top-full z-40 mt-2 max-h-72 w-[calc(100vw-3.5rem)] max-w-xs overflow-y-auto rounded-2xl border border-white/80 bg-white/80 p-1.5 shadow-xl backdrop-blur-2xl md:w-80 md:max-w-none"
+          >
+            {events.length === 0 && (
+              <p className="px-3 py-4 text-center text-sm text-slate-500">No events yet.</p>
+            )}
+            {events.map((e) => {
+              const active = e.id === selectedId;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => {
+                    onSelect(e.id);
+                    setOpen(false);
+                    buttonRef.current?.focus();
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/80 ${
+                    active ? 'bg-white/70' : ''
+                  }`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-800">{e.title}</span>
+                    <span className="block truncate text-xs text-slate-500">{formatEventMeta(e)}</span>
+                  </span>
+                  {active && <Check size={16} className="shrink-0 text-violet-600" />}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export default function AdminPage({ user, onSignOut }: AdminPageProps) {
-  // TODO: Phase 3 Supabase — fetch events & attendees
-  const [events, setEvents] = useState<EventItem[]>(INITIAL_EVENTS);
-  const [attendees, setAttendees] = useState<Attendee[]>(INITIAL_ATTENDEES);
-  const [eventId, setEventId] = useState(INITIAL_EVENTS[0].id);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [attendees, setAttendees] = useState<Attendee[]>([]);
+  const [eventId, setEventId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ title: '', venue: '', date: '', pin: '' });
 
-  const event = events.find((e) => e.id === eventId) ?? events[0];
-  const eventAttendees = useMemo(
-    () => attendees.filter((a) => a.event_id === eventId),
-    [attendees, eventId],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('event_date', { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        setError(error.message);
+      } else {
+        const list = (data ?? []) as EventItem[];
+        setEvents(list);
+        setEventId(list[0]?.id ?? '');
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const total = eventAttendees.length;
-  const checked = eventAttendees.filter((a) => a.checked_in).length;
+  useEffect(() => {
+    if (!eventId) {
+      setAttendees([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('attendees')
+        .select('*')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      if (error) setError(error.message);
+      else setAttendees((data ?? []) as Attendee[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  const event: EventItem | undefined = events.find((e) => e.id === eventId) ?? events[0];
+  const registerPath = event ? `/register/${event.slug}` : '/register';
+  const scannerPath = event ? `/scanner/${event.slug}` : '/scanner';
+
+  const total = attendees.length;
+  const checked = attendees.filter((a) => a.checked_in).length;
   const pending = total - checked;
   const pct = total ? Math.round((checked / total) * 100) : 0;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return eventAttendees.filter((a) => {
+    return attendees.filter((a) => {
       if (filter === 'checked_in' && !a.checked_in) return false;
       if (filter === 'pending' && a.checked_in) return false;
       if (!q) return true;
@@ -120,19 +214,24 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
         f.toLowerCase().includes(q),
       );
     });
-  }, [eventAttendees, query, filter]);
+  }, [attendees, query, filter]);
 
-  const toggleCheckIn = (id: string) => {
-    // TODO: Phase 3 Supabase — update attendees.checked_in / checked_in_at
+  const toggleCheckIn = async (id: string) => {
+    const target = attendees.find((a) => a.id === id);
+    if (!target) return;
+    const nextState = !target.checked_in;
+    const checkedInAt = nextState ? new Date().toISOString() : null;
+    const { error } = await supabase
+      .from('attendees')
+      .update({ checked_in: nextState, checked_in_at: checkedInAt })
+      .eq('id', id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
     setAttendees((prev) =>
       prev.map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              checked_in: !a.checked_in,
-              checked_in_at: !a.checked_in ? new Date().toISOString() : null,
-            }
-          : a,
+        a.id === id ? { ...a, checked_in: nextState, checked_in_at: checkedInAt } : a,
       ),
     );
   };
@@ -166,32 +265,51 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${event.slug}-attendees.csv`;
+    link.download = `${event?.slug ?? 'event'}-attendees.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
-  const createEvent = (ev: FormEvent) => {
+  const createEvent = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (!form.title.trim() || !form.venue.trim() || !form.date) return;
-    // TODO: Phase 3 Supabase — insert into events
+    if (!form.title.trim() || !form.venue.trim() || !form.date || creating) return;
+    if (form.pin && form.pin.length !== 4) {
+      setFormError('Scanner PIN must be exactly 4 digits.');
+      return;
+    }
+    setCreating(true);
+    setFormError(null);
     const slug = form.title
       .toLowerCase()
       .trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
-    const created: EventItem = {
-      id: `evt-${Date.now()}`,
-      slug,
-      title: form.title.trim(),
-      description: null,
-      event_date: new Date(form.date).toISOString(),
-      venue: form.venue.trim(),
-      scanner_pin: form.pin || undefined,
-      is_active: true,
-      created_at: new Date().toISOString(),
-    };
-    setEvents((prev) => [...prev, created]);
+    const { data, error } = await supabase
+      .from('events')
+      .insert({
+        slug,
+        title: form.title.trim(),
+        description: null,
+        event_date: new Date(form.date).toISOString(),
+        venue: form.venue.trim(),
+        scanner_pin: form.pin || '1234',
+        is_active: true,
+      })
+      .select('*')
+      .single();
+    setCreating(false);
+    if (error || !data) {
+      setFormError(
+        error?.code === '23505'
+          ? 'An event with a similar title already exists. Try a different title.'
+          : (error?.message ?? 'Could not create event.'),
+      );
+      return;
+    }
+    const created = data as EventItem;
+    setEvents((prev) =>
+      [...prev, created].sort((a, b) => a.event_date.localeCompare(b.event_date)),
+    );
     setEventId(created.id);
     setForm({ title: '', venue: '', date: '', pin: '' });
     setModalOpen(false);
@@ -207,69 +325,151 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     <div className="pastel-mesh-bg min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-4">
         {/* Header */}
-        <header className="liquid-glass flex flex-wrap items-center gap-3 rounded-3xl p-4">
-          <div className="flex items-center gap-2 rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500 text-white">
-              <ShieldCheck size={16} />
-            </span>
-            <span className="max-w-[180px] truncate">{user.full_name ?? user.email}</span>
-          </div>
+        <header className="liquid-glass relative z-30 rounded-3xl p-3 overflow-visible! sm:p-4">
+          <div className="flex items-center gap-3">
+            {/* Admin badge (desktop) */}
+            <div className="hidden items-center gap-2 rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700 md:flex">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500 text-white">
+                <ShieldCheck size={16} />
+              </span>
+              <span className="max-w-[180px] truncate">{user.full_name ?? user.email}</span>
+            </div>
 
-          <div className="relative">
-            <select
-              value={eventId}
-              onChange={(e) => setEventId(e.target.value)}
-              aria-label="Switch event"
-              className="liquid-pill-input appearance-none pr-10"
-            >
-              {events.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.title}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={16}
-              className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500"
+            <EventDropdown
+              events={events}
+              selectedId={eventId}
+              loading={loading}
+              onSelect={setEventId}
+              className="min-w-0 flex-1 md:w-64 md:flex-none"
             />
-          </div>
 
-          <button
-            onClick={() => setModalOpen(true)}
-            className="liquid-btn-primary flex items-center gap-1.5"
-          >
-            <Plus size={16} /> New Event
-          </button>
-
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <a
-              href={`/register/${event.slug}`}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(`/register/${event.slug}`);
-              }}
-              className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
-            >
-              <Ticket size={14} /> Register
-            </a>
-            <a
-              href={`/scanner/${event.slug}`}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(`/scanner/${event.slug}`);
-              }}
-              className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
-            >
-              <ScanLine size={14} /> Scanner
-            </a>
+            {/* Desktop actions */}
             <button
-              onClick={onSignOut}
-              className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
+              onClick={() => setModalOpen(true)}
+              className="liquid-btn-primary hidden items-center gap-1.5 md:flex"
             >
-              <LogOut size={14} /> Sign Out
+              <Plus size={16} /> New Event
+            </button>
+
+            <div className="ml-auto hidden items-center gap-2 md:flex">
+              <a
+                href={registerPath}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(registerPath);
+                }}
+                className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
+              >
+                <Ticket size={14} /> Register
+              </a>
+              <a
+                href={scannerPath}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(scannerPath);
+                }}
+                className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
+              >
+                <ScanLine size={14} /> Scanner
+              </a>
+              <button
+                onClick={onSignOut}
+                className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
+            </div>
+
+            {/* Hamburger (< md) */}
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}
+              aria-controls="admin-mobile-drawer"
+              className="liquid-glass flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-700 md:hidden"
+            >
+              {menuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
+
+          {/* Mobile drawer */}
+          <AnimatePresence initial={false}>
+            {menuOpen && (
+              <motion.div
+                id="admin-mobile-drawer"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden md:hidden"
+              >
+                <div className="liquid-glass mt-3 flex flex-col gap-2 rounded-2xl p-3">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setModalOpen(true);
+                    }}
+                    className="liquid-btn-primary flex w-full items-center justify-center gap-1.5"
+                  >
+                    <Plus size={16} /> New Event
+                  </button>
+                  <a
+                    href={registerPath}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMenuOpen(false);
+                      navigate(registerPath);
+                    }}
+                    className="liquid-glass flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-sm text-slate-700"
+                  >
+                    <Ticket size={14} /> Register Link
+                  </a>
+                  <a
+                    href={scannerPath}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMenuOpen(false);
+                      navigate(scannerPath);
+                    }}
+                    className="liquid-glass flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-sm text-slate-700"
+                  >
+                    <ScanLine size={14} /> Scanner Link
+                  </a>
+                  <div className="flex items-center gap-2 rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
+                      <ShieldCheck size={16} />
+                    </span>
+                    <span className="min-w-0 truncate">{user.full_name ?? user.email}</span>
+                  </div>
+                  <button
+                    onClick={onSignOut}
+                    className="liquid-glass flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-sm text-slate-700"
+                  >
+                    <LogOut size={14} /> Sign Out
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
+
+        {error && (
+          <div
+            role="alert"
+            className="liquid-glass flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm text-rose-600"
+          >
+            <span className="min-w-0 break-words">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              className="shrink-0 rounded-full bg-white/60 p-1.5 text-slate-600"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* KPI row */}
         <div className="grid gap-4 md:grid-cols-3">
@@ -306,9 +506,9 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
         </div>
 
         {/* Attendee management */}
-        <section className="liquid-glass rounded-3xl p-5">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative min-w-[220px] flex-1">
+        <section className="liquid-glass rounded-3xl p-4 sm:p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+            <div className="relative w-full md:min-w-[220px] md:flex-1">
               <Search
                 size={16}
                 className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"
@@ -321,12 +521,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               />
             </div>
 
-            <div className="liquid-glass relative flex rounded-full p-1">
+            <div className="liquid-glass relative grid w-full grid-cols-3 rounded-full p-1 md:flex md:w-auto">
               {filters.map((f) => (
                 <button
                   key={f.key}
                   onClick={() => setFilter(f.key)}
-                  className="relative z-10 rounded-full px-4 py-1.5 text-sm font-medium"
+                  className="relative z-10 rounded-full px-3 py-1.5 text-center text-sm font-medium sm:px-4"
                 >
                   {filter === f.key && (
                     <motion.span
@@ -344,7 +544,8 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
 
             <button
               onClick={exportCsv}
-              className="liquid-glass flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700"
+              disabled={!event}
+              className="liquid-glass flex w-full items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm text-slate-700 disabled:opacity-50 md:w-auto"
             >
               <Download size={14} /> Export CSV
             </button>
@@ -396,7 +597,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 {visible.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-3 py-10 text-center text-slate-500">
-                      No attendees match your filters.
+                      {loading ? 'Loading…' : 'No attendees match your filters.'}
                     </td>
                   </tr>
                 )}
@@ -458,13 +659,24 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               />
               <input
                 value={form.pin}
-                onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                onChange={(e) =>
+                  setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })
+                }
                 placeholder="4-digit scanner PIN"
                 inputMode="numeric"
                 className="liquid-pill-input w-full"
               />
-              <button type="submit" className="liquid-btn-primary w-full">
-                Create Event
+              {formError && (
+                <p role="alert" className="text-xs font-semibold text-rose-600">
+                  {formError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={creating}
+                className="liquid-btn-primary w-full disabled:opacity-60"
+              >
+                {creating ? 'Creating…' : 'Create Event'}
               </button>
             </motion.form>
           </motion.div>

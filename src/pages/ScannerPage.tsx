@@ -10,43 +10,27 @@ import {
   XCircle,
   CameraOff,
   Delete,
+  Loader2,
   User,
   Mail,
   Building2,
   Phone,
 } from 'lucide-react';
-import type { Attendee, CheckInResponse } from '../types/database';
+import type { CheckInResponse, EventItem } from '../types/database';
+import { supabase } from '../lib/supabase';
 
-const MOCK_PIN = '1234';
 const READER_ID = 'qr-reader';
 const SCAN_COOLDOWN_MS = 2500;
 
-const MOCK_ATTENDEES: Attendee[] = [
-  {
-    id: 'a1',
-    event_id: 'evt-1',
-    ticket_code: 'TKT-1001',
-    full_name: 'Maria Santos',
-    email: 'maria@example.com',
-    organization: 'Lumina Labs',
-    contact_number: '+63 917 555 0101',
-    checked_in: false,
-    checked_in_at: null,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'a2',
-    event_id: 'evt-1',
-    ticket_code: 'TKT-1002',
-    full_name: 'Jose Reyes',
-    email: 'jose@example.com',
-    organization: 'Northwind Co.',
-    contact_number: '+63 918 555 0102',
-    checked_in: true,
-    checked_in_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
-    created_at: new Date().toISOString(),
-  },
-];
+const getSlugFromPath = (): string | null => {
+  const [, , slug] = window.location.pathname.split('/');
+  return slug ? decodeURIComponent(slug) : null;
+};
+
+const goBackToDashboard = () => {
+  window.history.pushState({}, '', '/admin');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+};
 
 type ScanState = 'ready' | 'valid' | 'already_checked_in' | 'invalid';
 
@@ -61,12 +45,12 @@ const STATUS_STYLE: Record<ScanState, { label: string; cls: string; Icon: typeof
   invalid: { label: 'Invalid Ticket', cls: 'bg-rose-100/90 text-rose-700', Icon: XCircle },
 };
 
-const goBackToDashboard = () => {
-  window.history.pushState({}, '', '/admin');
-  window.dispatchEvent(new PopStateEvent('popstate'));
-};
-
 export default function ScannerPage() {
+  const [event, setEvent] = useState<EventItem | null>(null);
+  const [eventError, setEventError] = useState<string | null>(null);
+  const [verifiedPin, setVerifiedPin] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [pinMessage, setPinMessage] = useState('Incorrect PIN.');
   const [unlocked, setUnlocked] = useState(false);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState(false);
@@ -74,49 +58,61 @@ export default function ScannerPage() {
   const [result, setResult] = useState<CheckInResponse | null>(null);
   const [cameraError, setCameraError] = useState(false);
 
-  const checkedInRef = useRef<Set<string>>(
-    new Set(MOCK_ATTENDEES.filter((a) => a.checked_in).map((a) => a.ticket_code)),
-  );
   const lastScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
 
-  const processTicket = useCallback((code: string, bypassCooldown = false) => {
-    const nowMs = Date.now();
-    if (
-      !bypassCooldown &&
-      lastScanRef.current.code === code &&
-      nowMs - lastScanRef.current.at < SCAN_COOLDOWN_MS
-    ) {
-      return;
-    }
-    lastScanRef.current = { code, at: nowMs };
-
-    // TODO: Phase 3 Supabase — call verify_and_checkin RPC
-    const attendee = MOCK_ATTENDEES.find((a) => a.ticket_code === code);
-    if (!attendee) {
-      setScanState('invalid');
-      setResult({ status: 'invalid', message: 'Ticket not recognised.' });
-      return;
-    }
-    if (checkedInRef.current.has(code)) {
-      setScanState('already_checked_in');
-      setResult({
-        status: 'already_checked_in',
-        message: 'This ticket was already used.',
-        checked_in_at: attendee.checked_in_at ?? new Date().toISOString(),
-        attendee: { ...attendee, checked_in: true },
-      });
-      return;
-    }
-    checkedInRef.current.add(code);
-    const now = new Date().toISOString();
-    setScanState('valid');
-    setResult({
-      status: 'valid',
-      message: 'Welcome in!',
-      checked_in_at: now,
-      attendee: { ...attendee, checked_in: true, checked_in_at: now },
-    });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const slug = getSlugFromPath();
+      const base = supabase
+        .from('events')
+        .select('id, slug, title, event_date, venue, is_active')
+        .eq('is_active', true);
+      const { data, error } = slug
+        ? await base.eq('slug', slug).single()
+        : await base.order('event_date', { ascending: true }).limit(1).single();
+      if (cancelled) return;
+      if (error || !data) setEventError('No active event found for this link.');
+      else setEvent(data as EventItem);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const processTicket = useCallback(
+    async (code: string) => {
+      if (!event) return;
+      const nowMs = Date.now();
+      if (
+        lastScanRef.current.code === code &&
+        nowMs - lastScanRef.current.at < SCAN_COOLDOWN_MS
+      ) {
+        return;
+      }
+      lastScanRef.current = { code, at: nowMs };
+
+      const { data, error } = await supabase.rpc('verify_and_checkin', {
+        p_event_id: event.id,
+        p_ticket_code: code,
+        p_scanner_pin: verifiedPin,
+      });
+
+      if (error || !data) {
+        setScanState('invalid');
+        setResult({
+          status: 'invalid',
+          message: 'Could not verify ticket. Check your connection and try again.',
+        });
+        return;
+      }
+
+      const res = data as CheckInResponse;
+      setScanState(res.status === 'unauthorized' ? 'invalid' : res.status);
+      setResult(res);
+    },
+    [event, verifiedPin],
+  );
 
   const decodeRef = useRef(processTicket);
   decodeRef.current = processTicket;
@@ -153,48 +149,67 @@ export default function ScannerPage() {
     };
   }, [unlocked]);
 
-  const pressKey = (k: string) => {
+  const pressKey = async (k: string) => {
+    if (verifying || !event) return;
     setPinError(false);
     if (k === 'del') return setPin((p) => p.slice(0, -1));
     if (pin.length >= 4) return;
     const next = pin + k;
     setPin(next);
-    if (next.length === 4) {
-      if (next === MOCK_PIN) {
-        setUnlocked(true);
-      } else {
-        setPinError(true);
-        setTimeout(() => setPin(''), 400);
-      }
+    if (next.length < 4) return;
+
+    setVerifying(true);
+    const { data, error } = await supabase.rpc('verify_and_checkin', {
+      p_event_id: event.id,
+      p_ticket_code: '__PIN_CHECK__',
+      p_scanner_pin: next,
+    });
+    setVerifying(false);
+
+    const res = data as CheckInResponse | null;
+    if (!error && res && res.status !== 'unauthorized') {
+      setVerifiedPin(next);
+      setUnlocked(true);
+    } else {
+      setPinMessage(error ? 'Could not verify PIN. Try again.' : 'Incorrect PIN.');
+      setPinError(true);
+      setTimeout(() => setPin(''), 400);
     }
   };
 
-  const simulate = (kind: 'valid' | 'duplicate' | 'invalid') => {
-    if (kind === 'valid') {
-      checkedInRef.current.delete('TKT-1001');
-      processTicket('TKT-1001', true);
-    } else if (kind === 'duplicate') {
-      processTicket('TKT-1002', true);
-    } else {
-      processTicket('TKT-0000', true);
-    }
-  };
+  /* ---------------- LOADING / EVENT ERROR ---------------- */
+  if (!event) {
+    return (
+      <div className="pastel-mesh-bg flex min-h-screen items-center justify-center p-4">
+        <div className="liquid-glass flex w-full max-w-sm flex-col items-center gap-3 rounded-[2rem] p-8 text-center">
+          {eventError ? (
+            <>
+              <XCircle size={28} className="text-rose-500" />
+              <p className="text-sm text-slate-700">{eventError}</p>
+              <button
+                type="button"
+                onClick={goBackToDashboard}
+                className="liquid-glass mt-1 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-slate-700"
+              >
+                <ArrowLeft size={14} />
+                Back to Dashboard
+              </button>
+            </>
+          ) : (
+            <>
+              <Loader2 size={28} className="animate-spin text-violet-500" />
+              <p className="text-sm text-slate-600">Loading event…</p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   /* ---------------- PIN GATE ---------------- */
   if (!unlocked) {
     return (
-      <div className="pastel-mesh-bg min-h-screen flex flex-col items-center justify-center p-4">
-        <div className="mb-4 w-full max-w-sm">
-          <button
-            type="button"
-            onClick={goBackToDashboard}
-            className="liquid-glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white/60"
-          >
-            <ArrowLeft size={14} />
-            Back to Dashboard
-          </button>
-        </div>
-
+      <div className="pastel-mesh-bg min-h-screen flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -204,7 +219,9 @@ export default function ScannerPage() {
             <Lock size={24} />
           </div>
           <h1 className="mt-4 text-xl font-semibold text-slate-800">Gate Staff Access</h1>
-          <p className="mt-1 text-sm text-slate-600">Enter the 4-digit Event Scanner PIN.</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Enter the 4-digit scanner PIN for {event.title}.
+          </p>
 
           <motion.div
             animate={pinError ? { x: [0, -10, 10, -8, 8, 0] } : { x: 0 }}
@@ -224,14 +241,15 @@ export default function ScannerPage() {
               />
             ))}
           </motion.div>
-          <p className="mt-3 h-4 text-xs text-rose-600">{pinError ? 'Incorrect PIN.' : ''}</p>
+          <p className="mt-3 h-4 text-xs text-rose-600">{pinError ? pinMessage : ''}</p>
 
           <div className="mt-4 grid grid-cols-3 gap-3">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => (
               <button
                 key={k}
                 onClick={() => pressKey(k)}
-                className="liquid-glass h-14 rounded-full text-lg font-medium text-slate-800 active:scale-95 transition"
+                disabled={verifying}
+                className="liquid-glass h-14 rounded-full text-lg font-medium text-slate-800 active:scale-95 transition disabled:opacity-60"
               >
                 {k}
               </button>
@@ -239,14 +257,16 @@ export default function ScannerPage() {
             <span />
             <button
               onClick={() => pressKey('0')}
-              className="liquid-glass h-14 rounded-full text-lg font-medium text-slate-800 active:scale-95 transition"
+              disabled={verifying}
+              className="liquid-glass h-14 rounded-full text-lg font-medium text-slate-800 active:scale-95 transition disabled:opacity-60"
             >
               0
             </button>
             <button
               onClick={() => pressKey('del')}
+              disabled={verifying}
               aria-label="Delete digit"
-              className="liquid-glass flex h-14 items-center justify-center rounded-full text-slate-700 active:scale-95 transition"
+              className="liquid-glass flex h-14 items-center justify-center rounded-full text-slate-700 active:scale-95 transition disabled:opacity-60"
             >
               <Delete size={20} />
             </button>
@@ -263,30 +283,19 @@ export default function ScannerPage() {
   return (
     <div className="pastel-mesh-bg min-h-screen p-4">
       <div className="mx-auto flex max-w-md flex-col gap-4">
-        {/* Top bar: Back button + Status pill */}
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={goBackToDashboard}
-            className="liquid-glass inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white/60"
+        {/* Status pill */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={scanState}
+            initial={{ opacity: 0, y: -8, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8 }}
+            className={`liquid-glass mx-auto flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold ${cls}`}
           >
-            <ArrowLeft size={14} />
-            Dashboard
-          </button>
-
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={scanState}
-              initial={{ opacity: 0, y: -8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8 }}
-              className={`liquid-glass flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ${cls}`}
-            >
-              <Icon size={15} />
-              {label}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+            <Icon size={16} />
+            {label}
+          </motion.div>
+        </AnimatePresence>
 
         {/* Viewfinder */}
         <div className="liquid-glass rounded-[2rem] p-3">
@@ -296,9 +305,7 @@ export default function ScannerPage() {
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-900/80 p-6 text-center text-white/90">
                 <CameraOff size={32} />
                 <p className="text-sm font-medium">Camera unavailable</p>
-                <p className="text-xs text-white/70">
-                  Allow camera access, or use the simulate controls below.
-                </p>
+                <p className="text-xs text-white/70">Allow camera access in your browser, then reload.</p>
               </div>
             )}
             {(['top-4 left-4 border-t-4 border-l-4 rounded-tl-2xl',
@@ -308,28 +315,6 @@ export default function ScannerPage() {
               <span key={c} className={`pointer-events-none absolute h-10 w-10 border-white ${c}`} />
             ))}
           </div>
-        </div>
-
-        {/* Simulate bar */}
-        <div className="liquid-glass flex items-center gap-2 rounded-full p-1.5">
-          <span className="pl-3 pr-1 text-[11px] uppercase tracking-wide text-slate-500">
-            Simulate
-          </span>
-          {(
-            [
-              ['valid', 'Valid'],
-              ['duplicate', 'Duplicate'],
-              ['invalid', 'Invalid'],
-            ] as const
-          ).map(([k, l]) => (
-            <button
-              key={k}
-              onClick={() => simulate(k)}
-              className="flex-1 rounded-full bg-white/60 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white/90"
-            >
-              {l}
-            </button>
-          ))}
         </div>
 
         {/* Result card */}

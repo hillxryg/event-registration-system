@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -17,17 +17,11 @@ import {
   User,
 } from 'lucide-react';
 import type { Attendee, EventItem } from '../types/database';
+import { supabase } from '../lib/supabase';
 
-// TODO: Phase 3 Supabase — fetch event by :slug from `events` table
-const MOCK_EVENT: EventItem = {
-  id: 'evt_7f3a91c2-5b0d-4e8a-9c1f-2d6e4a8b0c13',
-  slug: 'innovate-summit-2026',
-  title: 'Innovate Summit 2026',
-  description: 'A one-day gathering of builders, founders, and designers.',
-  event_date: '2026-12-12T09:00:00+08:00',
-  venue: 'SMX Convention Center, Pasay City, Metro Manila',
-  is_active: true,
-  created_at: '2026-10-01T08:00:00+08:00',
+const getSlugFromPath = (): string | null => {
+  const [, , slug] = window.location.pathname.split('/');
+  return slug ? decodeURIComponent(slug) : null;
 };
 
 type FormValues = Pick<
@@ -63,12 +57,12 @@ function validate(values: FormValues): FormErrors {
   return errors;
 }
 
-function generateMockTicketCode(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateTicketCode(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
   let code = '';
-  for (let i = 0; i < 8; i += 1) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
+  for (const b of bytes) code += alphabet[b % alphabet.length];
   return `EVT-${code}`;
 }
 
@@ -143,7 +137,7 @@ function Field({
           onBlur={onBlur}
           aria-invalid={error ? 'true' : 'false'}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="liquid-pill-input pl-16"
+          className="liquid-pill-input pl-14"
         />
       </div>
       <AnimatePresence initial={false}>
@@ -294,9 +288,10 @@ function DigitalPass({ event, attendee, confirmed }: PassProps) {
 }
 
 export default function RegisterPage() {
-  // TODO: Phase 3 Supabase — replace with event loaded via route :slug
-  const event = MOCK_EVENT;
-  const { day, time } = formatEventDate(event.event_date);
+  const [event, setEvent] = useState<EventItem | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [checkingRegistration, setCheckingRegistration] = useState(true);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [values, setValues] = useState<FormValues>(EMPTY_FORM);
   const [touched, setTouched] = useState<Partial<Record<keyof FormValues, boolean>>>({});
@@ -307,6 +302,159 @@ export default function RegisterPage() {
   const visibleErrors: FormErrors = Object.fromEntries(
     Object.entries(errors).filter(([key]) => touched[key as keyof FormValues]),
   );
+
+  // Load event (by :slug, or earliest active event)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const slug = getSlugFromPath();
+      const columns = 'id, slug, title, description, event_date, venue, is_active, created_at';
+      const base = supabase.from('events').select(columns);
+      const { data, error } = slug
+        ? await base.eq('slug', slug).eq('is_active', true).single()
+        : await base
+            .eq('is_active', true)
+            .order('event_date', { ascending: true })
+            .limit(1)
+            .single();
+      if (cancelled) return;
+      if (error || !data) {
+        setLoadError('We couldn’t find an active event for this link.');
+        return;
+      }
+      setEvent(data as EventItem);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Existing registration check + pre-fill
+  useEffect(() => {
+    if (!event) return;
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (user) {
+        const { data: existing } = await supabase
+          .from('attendees')
+          .select('*')
+          .eq('event_id', event.id)
+          .limit(1)
+          .maybeSingle();
+        if (cancelled) return;
+        if (existing) {
+          setConfirmed(existing as Attendee);
+          setCheckingRegistration(false);
+          return;
+        }
+        setValues((prev) => ({
+          ...prev,
+          email: prev.email || user.email || '',
+          full_name:
+            prev.full_name || ((user.user_metadata?.full_name as string | undefined) ?? ''),
+        }));
+      }
+      setCheckingRegistration(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [event]);
+
+  const handleChange =
+    (field: keyof FormValues) => (e: ChangeEvent<HTMLInputElement>) => {
+      setValues((prev) => ({ ...prev, [field]: e.target.value }));
+    };
+
+  const handleBlur = (field: keyof FormValues) => () => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  };
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setTouched({
+      full_name: true,
+      email: true,
+      organization: true,
+      contact_number: true,
+    });
+    if (!event || Object.keys(errors).length > 0 || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    const payload = {
+      event_id: event.id,
+      full_name: values.full_name.trim(),
+      email: values.email.trim(),
+      organization: values.organization.trim(),
+      contact_number: values.contact_number.trim(),
+    };
+
+    let created: Attendee | null = null;
+    let failure: { code?: string; message: string; details?: string } | null = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { data, error } = await supabase
+        .from('attendees')
+        .insert({ ...payload, ticket_code: generateTicketCode() })
+        .select()
+        .single();
+      if (!error) {
+        created = data as Attendee;
+        break;
+      }
+      failure = error;
+      const ticketCollision =
+        error.code === '23505' && `${error.message} ${error.details ?? ''}`.includes('ticket_code');
+      if (!ticketCollision) break;
+    }
+
+    if (created) {
+      setConfirmed(created);
+      // TODO: Phase 4 — invoke send-ticket-email Edge Function
+    } else {
+      setSubmitError(
+        failure?.code === '23505'
+          ? 'You’re already registered for this event with this email. Check your inbox for your pass, or sign in with the email you registered with.'
+          : 'We couldn’t complete your registration. Please try again.',
+      );
+    }
+    setSubmitting(false);
+  };
+
+  const handleReset = () => {
+    setConfirmed(null);
+    setValues(EMPTY_FORM);
+    setTouched({});
+    setSubmitError(null);
+  };
+
+  if (!event || checkingRegistration) {
+    return (
+      <div className="pastel-mesh-bg flex min-h-screen items-center justify-center px-4">
+        <div className="liquid-glass flex max-w-sm flex-col items-center gap-3 p-8 text-center">
+          {loadError ? (
+            <>
+              <AlertCircle size={28} className="text-rose-600" />
+              <p className="text-sm font-semibold text-[#18181B]/80">{loadError}</p>
+            </>
+          ) : (
+            <>
+              <Loader2 size={28} className="animate-spin text-[#18181B]/70" />
+              <p className="text-sm font-semibold text-[#18181B]/70">Loading event…</p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const { day, time } = formatEventDate(event.event_date);
 
   const previewAttendee: Attendee = {
     id: 'preview',
@@ -321,53 +469,8 @@ export default function RegisterPage() {
     created_at: new Date().toISOString(),
   };
 
-  const handleChange =
-    (field: keyof FormValues) => (e: ChangeEvent<HTMLInputElement>) => {
-      setValues((prev) => ({ ...prev, [field]: e.target.value }));
-    };
-
-  const handleBlur = (field: keyof FormValues) => () => {
-    setTouched((prev) => ({ ...prev, [field]: true }));
-  };
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setTouched({
-      full_name: true,
-      email: true,
-      organization: true,
-      contact_number: true,
-    });
-    if (Object.keys(errors).length > 0 || submitting) return;
-
-    setSubmitting(true);
-    // TODO: Phase 3 Supabase — insert into `attendees`, receive real ticket_code
-    // TODO: Phase 4 — trigger Edge Function for Resend QR ticket email
-    window.setTimeout(() => {
-      setConfirmed({
-        id: crypto.randomUUID(),
-        event_id: event.id,
-        ticket_code: generateMockTicketCode(),
-        full_name: values.full_name.trim(),
-        email: values.email.trim(),
-        organization: values.organization.trim(),
-        contact_number: values.contact_number.trim(),
-        checked_in: false,
-        checked_in_at: null,
-        created_at: new Date().toISOString(),
-      });
-      setSubmitting(false);
-    }, 900);
-  };
-
-  const handleReset = () => {
-    setConfirmed(null);
-    setValues(EMPTY_FORM);
-    setTouched({});
-  };
-
   return (
-    <div className="pastel-mesh-bg min-h-screen px-4 py-10 sm:px-6 lg:px-10 lg:py-16">
+    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-20 sm:px-6 sm:pt-16 lg:px-10 lg:pb-16 lg:pt-16">
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}
@@ -379,7 +482,7 @@ export default function RegisterPage() {
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
             Registration Open
           </span>
-          <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-[#18181B] sm:text-5xl">
+          <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-[#18181B] sm:text-4xl lg:text-5xl">
             Reserve your spot.
           </h1>
           <p className="mt-2 max-w-xl text-base font-medium text-[#18181B]/65">
@@ -453,10 +556,25 @@ export default function RegisterPage() {
                   onBlur={handleBlur('contact_number')}
                 />
 
+                <AnimatePresence initial={false}>
+                  {submitError && (
+                    <motion.p
+                      role="alert"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      className="flex items-start gap-2 rounded-2xl bg-rose-50/80 px-4 py-3 text-xs font-semibold text-rose-700"
+                    >
+                      <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                      {submitError}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+
                 <button
                   type="submit"
                   disabled={submitting || confirmed !== null}
-                  className="liquid-btn-primary mt-2 w-full"
+                  className="liquid-btn-primary mt-2 w-full gap-2 px-4 text-sm sm:text-base"
                 >
                   {submitting ? (
                     <>
@@ -524,14 +642,14 @@ export default function RegisterPage() {
                 >
                   <DigitalPass event={event} attendee={confirmed} confirmed />
                   <div className="mt-5 flex flex-col items-center gap-3">
-                    <p className="flex items-center gap-2 text-sm font-semibold text-[#18181B]/70">
-                      <CheckCircle2 size={16} className="text-emerald-600" />
+                    <p className="flex items-center justify-center gap-2 text-center text-sm font-semibold text-[#18181B]/70">
+                      <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
                       A copy will be sent to {confirmed.email}
                     </p>
                     <button
                       type="button"
                       onClick={handleReset}
-                      className="inline-flex h-12 items-center gap-2 rounded-full bg-[#18181B] px-6 text-sm font-bold text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_10px_24px_-8px_rgba(24,24,27,0.5)] transition-transform hover:-translate-y-0.5 active:scale-[0.97]"
+                      className="inline-flex h-12 w-full max-w-xs items-center justify-center gap-2 rounded-full bg-[#18181B] px-6 text-sm font-bold text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_10px_24px_-8px_rgba(24,24,27,0.5)] transition-transform hover:-translate-y-0.5 active:scale-[0.97] sm:w-auto"
                     >
                       <RotateCcw size={16} />
                       Register Another Guest

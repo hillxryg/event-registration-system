@@ -3,10 +3,11 @@
 ## Current Project Phase
 - **Completed:**
   - Phase 1: Architecture, Supabase Schema (`supabase/schema.sql`), TypeScript Contracts (`src/types/database.ts`), Local Vite Scaffold
-  - Phase 2A: Core Liquid-Glass Design System (`src/index.css`) & Guest Registration Page (`src/pages/RegisterPage.tsx`)
-- **Active:** Phase 2B — Auth Login/Signup Page (`src/pages/AuthPage.tsx`), Gate Check-In Scanner UI (`src/pages/ScannerPage.tsx`), Admin Dashboard UI (`src/pages/AdminPage.tsx`), & Role-Based Routing (`src/App.tsx`) using static mock data
+  - Phase 2A: Liquid-Glass Design System (`src/index.css`) & Guest Registration Page (`src/pages/RegisterPage.tsx`)
+  - Phase 2B: Auth Login/Signup (`src/pages/AuthPage.tsx`), Gate Scanner (`src/pages/ScannerPage.tsx`), Admin Dashboard (`src/pages/AdminPage.tsx`), & Role-Based Routing (`src/App.tsx`)
+  - Phase 3A: Supabase Client (`src/lib/supabase.ts`), Real Supabase Auth + Profile Role Redirect (`src/pages/AuthPage.tsx`, `src/App.tsx`)
+- **Active:** Phase 3B — Wire Live Supabase Database Queries & RPC into `src/pages/RegisterPage.tsx`, `src/pages/ScannerPage.tsx`, and `src/pages/AdminPage.tsx`
 - **Upcoming:**
-  - Phase 3: Supabase Client Wiring (`src/lib/supabase.ts`), Real Supabase Auth + Profile Role Redirect, & Live Queries/RPC
   - Phase 4: Supabase Edge Function + Resend Automated HTML QR Ticket Email
   - Phase 5: End-to-End Testing & Deployment
 
@@ -14,30 +15,24 @@
 ```text
 event-checkin/
 ├── public/
-│   ├── favicon.svg
-│   └── icons.svg
 ├── src/
-│   ├── assets/
-│   ├── components/       # Reusable UI pieces (e.g., TicketPass.tsx, MeshBackground.tsx)
-│   ├── lib/              # Supabase client & helper utilities (Phase 3)
-│   ├── pages/            # Route views (RegisterPage.tsx, ScannerPage.tsx, AdminPage.tsx)
+│   ├── lib/
+│   │   └── supabase.ts       # Completed (Phase 3A) — Exports `supabase` and `fetchUserProfile`
+│   ├── pages/
+│   │   ├── AuthPage.tsx      # Completed (Phase 3A) — Real Supabase signInWithPassword / signUp
+│   │   ├── RegisterPage.tsx  # Target (Phase 3B) — Needs live event fetch & attendee insert
+│   │   ├── ScannerPage.tsx   # Target (Phase 3B) — Needs live event lookup & verify_and_checkin RPC
+│   │   └── AdminPage.tsx     # Target (Phase 3B) — Needs live events/attendees CRUD
 │   ├── types/
-│   │   └── database.ts   # Source-of-truth TypeScript interfaces (EventItem, Attendee, CheckInResponse)
-│   ├── App.css
-│   ├── App.tsx
-│   ├── index.css         # Tailwind v4 + custom liquid-glass utilities
+│   │   └── database.ts       # Source-of-truth TypeScript interfaces
+│   ├── App.tsx               # Completed (Phase 3A) — Real Supabase session & role routing
+│   ├── index.css             # Completed (Phase 2A)
 │   └── main.tsx
 ├── supabase/
-│   └── schema.sql        # PostgreSQL tables (events, attendees), RLS policies, verify_and_checkin RPC
-├── eslint.config.js
-├── index.html
+│   └── schema.sql            # PostgreSQL tables (profiles, events, attendees), RLS policies, verify_and_checkin RPC
+├── .env.local
 ├── package.json
-├── PROJECT_SPEC.md
-├── README.md
-├── tsconfig.app.json
-├── tsconfig.json
-├── tsconfig.node.json
-└── vite.config.ts
+└── PROJECT_SPEC.md
 ```
 
 # Tech Stack
