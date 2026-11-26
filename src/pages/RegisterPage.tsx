@@ -30,7 +30,7 @@ const getSlugFromPath = (): string | null => {
 };
 
 const EVENT_COLUMNS =
-  'id, slug, title, description, event_date, venue, visibility, is_active, created_at';
+  'id, slug, title, description, event_date, venue, visibility, status, created_at';
 
 type FormValues = Pick<
   Attendee,
@@ -382,7 +382,7 @@ export default function RegisterPage() {
         const { data, error } = await supabase
           .from('events')
           .select(EVENT_COLUMNS)
-          .eq('is_active', true)
+          .eq('status', 'active')
           .eq('visibility', 'public')
           .order('event_date', { ascending: true });
         if (cancelled) return;
@@ -404,11 +404,10 @@ export default function RegisterPage() {
         .from('events')
         .select(EVENT_COLUMNS)
         .eq('slug', slug)
-        .eq('is_active', true)
         .single();
       if (cancelled) return;
       if (error || !data) {
-        setLoadError('We couldn’t find an active event for this link.');
+        setLoadError('We couldn’t find an event for this link.');
         return;
       }
       setEvent(data as EventItem);
@@ -471,7 +470,7 @@ export default function RegisterPage() {
       organization: true,
       contact_number: true,
     });
-    if (!event || Object.keys(errors).length > 0 || submitting) return;
+    if (!event || event.status !== 'active' || Object.keys(errors).length > 0 || submitting) return;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -655,6 +654,9 @@ export default function RegisterPage() {
   }
 
   const { day, time } = formatEventDate(event.event_date);
+  const isClosed = event.status === 'closed';
+  const isCancelled = event.status === 'cancelled';
+  const registrationLocked = isClosed || isCancelled;
 
   const previewAttendee: Attendee = {
     id: 'preview',
@@ -688,10 +690,22 @@ export default function RegisterPage() {
               <ArrowLeft size={13} />
               All Events
             </button>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
-              <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-              Registration Open
-            </span>
+            {isClosed ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-amber-200/80 bg-amber-100/70 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-800 backdrop-blur-xl">
+                <Clock size={12} />
+                Registration Closed
+              </span>
+            ) : isCancelled ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-rose-200/80 bg-rose-100/70 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-700 backdrop-blur-xl">
+                <XCircle size={12} />
+                Event Cancelled
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/75 bg-white/45 px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#18181B]/70 shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] backdrop-blur-xl">
+                <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+                Registration Open
+              </span>
+            )}
             <span
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] backdrop-blur-xl ${
                 event.visibility === 'exclusive'
@@ -729,88 +743,120 @@ export default function RegisterPage() {
                 Your pass updates live as you type.
               </p>
 
-              <form onSubmit={handleSubmit} noValidate className="space-y-5">
-                <Field
-                  id="full_name"
-                  label="Full name"
-                  placeholder="Juan Dela Cruz"
-                  autoComplete="name"
-                  value={values.full_name}
-                  error={visibleErrors.full_name}
-                  icon={<User size={18} />}
-                  onChange={handleChange('full_name')}
-                  onBlur={handleBlur('full_name')}
-                />
-                <Field
-                  id="email"
-                  label="Email address"
-                  type="email"
-                  inputMode="email"
-                  placeholder="juan@company.com"
-                  autoComplete="email"
-                  value={values.email}
-                  error={visibleErrors.email}
-                  icon={<Mail size={18} />}
-                  onChange={handleChange('email')}
-                  onBlur={handleBlur('email')}
-                />
-                <Field
-                  id="organization"
-                  label="Organization"
-                  placeholder="Acme Corporation"
-                  autoComplete="organization"
-                  value={values.organization}
-                  error={visibleErrors.organization}
-                  icon={<Building2 size={18} />}
-                  onChange={handleChange('organization')}
-                  onBlur={handleBlur('organization')}
-                />
-                <Field
-                  id="contact_number"
-                  label="Contact number"
-                  type="tel"
-                  inputMode="tel"
-                  placeholder="+63 917 123 4567"
-                  autoComplete="tel"
-                  value={values.contact_number}
-                  error={visibleErrors.contact_number}
-                  icon={<Phone size={18} />}
-                  onChange={handleChange('contact_number')}
-                  onBlur={handleBlur('contact_number')}
-                />
-
-                <AnimatePresence initial={false}>
-                  {submitError && (
-                    <motion.p
-                      role="alert"
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className="flex items-start gap-2 rounded-2xl bg-rose-50/80 px-4 py-3 text-xs font-semibold text-rose-700"
-                    >
-                      <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                      {submitError}
-                    </motion.p>
-                  )}
-                </AnimatePresence>
-
-                <button
-                  type="submit"
-                  disabled={submitting || confirmed !== null}
-                  className="liquid-btn-primary mt-2 w-full gap-2 px-4 text-sm sm:text-base"
+              {registrationLocked && (
+                <div
+                  role="status"
+                  className={`mb-6 flex items-start gap-3 rounded-2xl border px-4 py-3.5 ${
+                    isClosed
+                      ? 'border-amber-200/80 bg-amber-100/60 text-amber-800'
+                      : 'border-rose-200/80 bg-rose-100/60 text-rose-800'
+                  }`}
                 >
-                  {submitting ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" />
-                      {event.visibility === 'exclusive' ? 'Submitting request…' : 'Generating pass…'}
-                    </>
+                  {isClosed ? (
+                    <Clock size={16} className="mt-0.5 shrink-0" />
                   ) : (
-                    <>
-                      {event.visibility === 'exclusive' ? 'Request to join' : 'Register & get my pass'}
-                      <ArrowRight size={18} />
-                    </>
+                    <XCircle size={16} className="mt-0.5 shrink-0" />
                   )}
-                </button>
+                  <div>
+                    <p className="text-sm font-bold">
+                      {isClosed ? 'Registration Closed' : 'Event Cancelled'}
+                    </p>
+                    <p className="mt-0.5 text-xs font-medium">
+                      {isClosed
+                        ? 'Registration for this event has closed. If you already registered, sign in with your registered email to view your pass.'
+                        : 'This event has been cancelled by the organizer.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} noValidate>
+                <fieldset
+                  disabled={registrationLocked}
+                  className="m-0 min-w-0 space-y-5 border-0 p-0 disabled:opacity-60"
+                >
+                  <Field
+                    id="full_name"
+                    label="Full name"
+                    placeholder="Juan Dela Cruz"
+                    autoComplete="name"
+                    value={values.full_name}
+                    error={visibleErrors.full_name}
+                    icon={<User size={18} />}
+                    onChange={handleChange('full_name')}
+                    onBlur={handleBlur('full_name')}
+                  />
+                  <Field
+                    id="email"
+                    label="Email address"
+                    type="email"
+                    inputMode="email"
+                    placeholder="juan@company.com"
+                    autoComplete="email"
+                    value={values.email}
+                    error={visibleErrors.email}
+                    icon={<Mail size={18} />}
+                    onChange={handleChange('email')}
+                    onBlur={handleBlur('email')}
+                  />
+                  <Field
+                    id="organization"
+                    label="Organization"
+                    placeholder="Acme Corporation"
+                    autoComplete="organization"
+                    value={values.organization}
+                    error={visibleErrors.organization}
+                    icon={<Building2 size={18} />}
+                    onChange={handleChange('organization')}
+                    onBlur={handleBlur('organization')}
+                  />
+                  <Field
+                    id="contact_number"
+                    label="Contact number"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="+63 917 123 4567"
+                    autoComplete="tel"
+                    value={values.contact_number}
+                    error={visibleErrors.contact_number}
+                    icon={<Phone size={18} />}
+                    onChange={handleChange('contact_number')}
+                    onBlur={handleBlur('contact_number')}
+                  />
+
+                  <AnimatePresence initial={false}>
+                    {submitError && (
+                      <motion.p
+                        role="alert"
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        className="flex items-start gap-2 rounded-2xl bg-rose-50/80 px-4 py-3 text-xs font-semibold text-rose-700"
+                      >
+                        <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                        {submitError}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+
+                  <button
+                    type="submit"
+                    disabled={submitting || confirmed !== null || registrationLocked}
+                    className="liquid-btn-primary mt-2 w-full gap-2 px-4 text-sm sm:text-base"
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        {event.visibility === 'exclusive' ? 'Submitting request…' : 'Generating pass…'}
+                      </>
+                    ) : (
+                      <>
+                        {event.visibility === 'exclusive' ? 'Request to join' : 'Register & get my pass'}
+                        <ArrowRight size={18} />
+                      </>
+                    )}
+                  </button>
+                </fieldset>
               </form>
             </motion.section>
 
@@ -871,14 +917,16 @@ export default function RegisterPage() {
                         A copy will be sent to {confirmed.email}
                       </p>
                     )}
-                    <button
-                      type="button"
-                      onClick={handleReset}
-                      className="inline-flex h-12 w-full max-w-xs items-center justify-center gap-2 rounded-full bg-[#18181B] px-6 text-sm font-bold text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_10px_24px_-8px_rgba(24,24,27,0.5)] transition-transform hover:-translate-y-0.5 active:scale-[0.97] sm:w-auto"
-                    >
-                      <RotateCcw size={16} />
-                      Register Another Guest
-                    </button>
+                    {!registrationLocked && (
+                      <button
+                        type="button"
+                        onClick={handleReset}
+                        className="inline-flex h-12 w-full max-w-xs items-center justify-center gap-2 rounded-full bg-[#18181B] px-6 text-sm font-bold text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_10px_24px_-8px_rgba(24,24,27,0.5)] transition-transform hover:-translate-y-0.5 active:scale-[0.97] sm:w-auto"
+                      >
+                        <RotateCcw size={16} />
+                        Register Another Guest
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               ) : (

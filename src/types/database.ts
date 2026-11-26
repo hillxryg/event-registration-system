@@ -1,5 +1,6 @@
 export type UserRole = 'guest' | 'admin';
 export type EventVisibility = 'public' | 'exclusive';
+export type EventStatus = 'active' | 'closed' | 'cancelled';
 export type RegistrationStatus = 'approved' | 'pending' | 'declined';
 
 export interface UserProfile {
@@ -18,8 +19,8 @@ export interface EventItem {
   event_date: string;
   venue: string;
   visibility: EventVisibility;
+  status: EventStatus;
   scanner_pin?: string;
-  is_active: boolean;
   created_at: string;
 }
 

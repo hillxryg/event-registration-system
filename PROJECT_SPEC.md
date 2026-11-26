@@ -2,8 +2,8 @@
 
 ## Current Project Phase
 - **Completed:**
-  - Phase 1–3B: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Mobile Hamburger Menu & Glass Event Dropdown
-- **Active:** Phase 3C — Event Visibility (`public` vs `exclusive`), Shareable `/register/:slug` Invite Links, Public Events Directory (`/register` without slug), & Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`)
+  - Phase 1–3C: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Shareable `/register/:slug` Invite Links, Public Events Directory (`/register`), & Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`)
+- **Active:** Phase 3D — Event Lifecycle Status (`active` | `closed` | `cancelled`) & Searchable, Status-Filtered Event Switcher in `AdminPage`
 - **Upcoming:**
   - Phase 4: Supabase Edge Function + Resend Automated HTML QR Ticket Email (triggered on instant public approval or when admin approves a pending exclusive guest)
   - Phase 5: End-to-End Testing & Deployment
@@ -16,12 +16,12 @@ event-checkin/
 │   │   └── supabase.ts       # Exports `supabase` and `fetchUserProfile`
 │   ├── pages/
 │   │   ├── AuthPage.tsx      # Real Supabase signInWithPassword / signUp
-│   │   ├── RegisterPage.tsx  # Target (Phase 3C) — Needs Public Events Directory (when no :slug) + Pending Approval pass state for exclusive events
-│   │   ├── ScannerPage.tsx   # Live verify_and_checkin RPC
-│   │   └── AdminPage.tsx     # Target (Phase 3C) — Needs Public/Exclusive selector, Copy Invite Link button, & Approve/Decline actions for pending guests
+│   │   ├── RegisterPage.tsx  # Target (Phase 3D) — Replace `is_active` with `status: EventStatus`; show notices for `closed` / `cancelled` events
+│   │   ├── ScannerPage.tsx   # Target (Phase 3D) — Allow `active` and `closed` events; block `cancelled` events
+│   │   └── AdminPage.tsx     # Target (Phase 3D) — Searchable + status-filtered `EventDropdown` & one-click `active` / `closed` / `cancelled` event status selector
 │   ├── types/
-│   │   └── database.ts       # UserRole, EventVisibility, RegistrationStatus, UserProfile, EventItem, Attendee, CheckInResponse
-│   ├── App.tsx               # Target (Phase 3C) — Preserve intended `/register/:slug` path after login
+│   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus, UserProfile, EventItem, Attendee, CheckInResponse
+│   ├── App.tsx               # Preserves intended `/register/:slug` path after login
 │   └── index.css             # .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
 ├── supabase/
 │   └── schema.sql
@@ -42,8 +42,9 @@ event-checkin/
 ## Updated Data Contracts (src/types/database.ts)
 - UserRole: 'guest' | 'admin'
 - EventVisibility: 'public' | 'exclusive'
+- EventStatus: 'active' | 'closed' | 'cancelled'
 - RegistrationStatus: 'approved' | 'pending' | 'declined'
-- EventItem: { id, slug, title, description, event_date, venue, visibility, scanner_pin?, is_active, created_at }
+- EventItem: { id, slug, title, description, event_date, venue, visibility, status, scanner_pin?, created_at }
 - Attendee: { id, event_id, ticket_code, full_name, email, organization, contact_number, status, checked_in, checked_in_at, created_at }
 
 ## Strict Restrictions & Guardrails (Mandatory)

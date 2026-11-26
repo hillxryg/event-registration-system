@@ -26,6 +26,7 @@ import type {
   EventItem,
   Attendee,
   EventVisibility,
+  EventStatus,
   RegistrationStatus,
 } from '../types/database';
 import { supabase } from '../lib/supabase';
@@ -42,6 +43,79 @@ const REG_STATUS_UI: Record<RegistrationStatus, { label: string; cls: string }> 
   approved: { label: 'Approved', cls: 'bg-emerald-100/90 text-emerald-700' },
   declined: { label: 'Declined', cls: 'bg-rose-100/90 text-rose-700' },
 };
+
+const EVENT_STATUSES: EventStatus[] = ['active', 'closed', 'cancelled'];
+
+const EVENT_STATUS_UI: Record<EventStatus, { label: string; dot: string; cls: string }> = {
+  active: { label: 'Active', dot: 'bg-emerald-500', cls: 'bg-emerald-100/90 text-emerald-700' },
+  closed: { label: 'Closed', dot: 'bg-amber-500', cls: 'bg-amber-100/90 text-amber-700' },
+  cancelled: { label: 'Cancelled', dot: 'bg-rose-500', cls: 'bg-rose-100/90 text-rose-700' },
+};
+
+function EventStatusBadge({ status }: { status: EventStatus }) {
+  const ui = EVENT_STATUS_UI[status];
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${ui.cls}`}
+    >
+      <span className={`size-1.5 rounded-full ${ui.dot}`} />
+      {ui.label}
+    </span>
+  );
+}
+
+function EventStatusControl({
+  status,
+  updating,
+  onChange,
+}: {
+  status: EventStatus;
+  updating: boolean;
+  onChange: (s: EventStatus) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Event status"
+      className="liquid-glass relative inline-flex rounded-full p-1"
+    >
+      {EVENT_STATUSES.map((s) => {
+        const on = status === s;
+        const ui = EVENT_STATUS_UI[s];
+        return (
+          <button
+            key={s}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            disabled={updating}
+            onClick={() => onChange(s)}
+            className="relative z-10 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-60"
+          >
+            {on && (
+              <motion.span
+                layoutId="event-status-pill"
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                className="absolute inset-0 -z-10 rounded-full bg-white/80 shadow"
+              />
+            )}
+            <span className={`size-1.5 rounded-full ${ui.dot}`} />
+            <span className={on ? 'text-violet-600' : 'text-slate-600'}>{ui.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type StatusTab = EventStatus | 'all';
+
+const STATUS_TABS: { key: StatusTab; label: string }[] = [
+  { key: 'active', label: 'Active' },
+  { key: 'closed', label: 'Closed' },
+  { key: 'cancelled', label: 'Cancelled' },
+  { key: 'all', label: 'All' },
+];
 
 function VisibilityBadge({ visibility }: { visibility: EventVisibility }) {
   const exclusive = visibility === 'exclusive';
@@ -330,9 +404,26 @@ interface EventDropdownProps {
 
 function EventDropdown({ events, selectedId, loading, onSelect, className = '' }: EventDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusTab, setStatusTab] = useState<StatusTab>('active');
   const wrapRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const selected = events.find((e) => e.id === selectedId);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return events.filter((e) => {
+      if (statusTab !== 'all' && e.status !== statusTab) return false;
+      if (!q) return true;
+      return [e.title, e.venue, e.slug].some((f) => f.toLowerCase().includes(q));
+    });
+  }, [events, search, statusTab]);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+    else setSearch('');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -364,6 +455,12 @@ function EventDropdown({ events, selectedId, loading, onSelect, className = '' }
         aria-label="Switch event"
         className="liquid-glass flex w-full items-center gap-2 rounded-full py-2 pl-4 pr-3 text-sm font-medium text-slate-700 transition hover:bg-white/60"
       >
+        {selected && (
+          <span
+            className={`size-2 shrink-0 rounded-full ${EVENT_STATUS_UI[selected.status].dot}`}
+            aria-hidden="true"
+          />
+        )}
         <span className="min-w-0 flex-1 truncate text-left">
           {loading ? 'Loading events…' : (selected?.title ?? 'No events yet')}
         </span>
@@ -376,43 +473,80 @@ function EventDropdown({ events, selectedId, loading, onSelect, className = '' }
       <AnimatePresence>
         {open && (
           <motion.div
-            role="listbox"
-            aria-label="Events"
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            className="liquid-glass absolute left-0 top-full z-40 mt-2 max-h-72 w-[calc(100vw-3.5rem)] max-w-xs overflow-y-auto rounded-2xl border border-white/80 bg-white/80 p-1.5 shadow-xl backdrop-blur-2xl sm:w-80 sm:max-w-none"
+            className="liquid-glass absolute left-0 top-full z-40 mt-2 max-h-80 w-[calc(100vw-3.5rem)] max-w-xs overflow-y-auto rounded-2xl border border-white/80 bg-white/80 p-1.5 shadow-xl backdrop-blur-2xl sm:w-80 sm:max-w-none"
           >
-            {events.length === 0 && (
-              <p className="px-3 py-4 text-center text-sm text-slate-500">No events yet.</p>
-            )}
-            {events.map((e) => {
-              const active = e.id === selectedId;
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  role="option"
-                  aria-selected={active}
-                  onClick={() => {
-                    onSelect(e.id);
-                    setOpen(false);
-                    buttonRef.current?.focus();
-                  }}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/80 ${
-                    active ? 'bg-white/70' : ''
-                  }`}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-800">{e.title}</span>
-                    <span className="block truncate text-xs text-slate-500">{formatEventMeta(e)}</span>
-                  </span>
-                  <VisibilityBadge visibility={e.visibility} />
-                  {active && <Check size={16} className="shrink-0 text-violet-600" />}
-                </button>
-              );
-            })}
+            {/* Sticky search + status tabs */}
+            <div className="sticky top-0 z-10 -mx-1.5 -mt-1.5 mb-1 space-y-2 rounded-t-2xl bg-white/90 p-2.5 backdrop-blur-xl">
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+                />
+                <input
+                  ref={searchRef}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search events…"
+                  aria-label="Search events"
+                  className="liquid-pill-input w-full py-2 pl-9 text-sm"
+                />
+              </div>
+              <div role="tablist" aria-label="Filter events by status" className="grid grid-cols-4 gap-1">
+                {STATUS_TABS.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={statusTab === t.key}
+                    onClick={() => setStatusTab(t.key)}
+                    className={pillCls(statusTab === t.key)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div role="listbox" aria-label="Events">
+              {filtered.length === 0 && (
+                <p className="px-3 py-4 text-center text-sm text-slate-500">
+                  {events.length === 0 ? 'No events yet.' : 'No events match.'}
+                </p>
+              )}
+              {filtered.map((e) => {
+                const active = e.id === selectedId;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => {
+                      onSelect(e.id);
+                      setOpen(false);
+                      buttonRef.current?.focus();
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/80 ${
+                      active ? 'bg-white/70' : ''
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-slate-800">{e.title}</span>
+                      <span className="block truncate text-xs text-slate-500">{formatEventMeta(e)}</span>
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end gap-1">
+                      <EventStatusBadge status={e.status} />
+                      <VisibilityBadge visibility={e.visibility} />
+                    </span>
+                    {active && <Check size={16} className="shrink-0 text-violet-600" />}
+                  </button>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -427,6 +561,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -455,7 +590,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
       } else {
         const list = (data ?? []) as EventItem[];
         setEvents(list);
-        setEventId(list[0]?.id ?? '');
+        setEventId((list.find((e) => e.status === 'active') ?? list[0])?.id ?? '');
       }
       setLoading(false);
     })();
@@ -506,6 +641,18 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
       );
     });
   }, [attendees, query, filter]);
+
+  const updateEventStatus = async (status: EventStatus) => {
+    if (!event || event.status === status || statusUpdating) return;
+    setStatusUpdating(true);
+    const { error } = await supabase.from('events').update({ status }).eq('id', event.id);
+    setStatusUpdating(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, status } : e)));
+  };
 
   const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
     const { error } = await supabase.from('attendees').update({ status }).eq('id', id);
@@ -614,7 +761,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
         venue: form.venue.trim(),
         visibility: form.visibility,
         scanner_pin: form.pin || '1234',
-        is_active: true,
+        status: 'active',
       })
       .select('*')
       .single();
@@ -725,6 +872,20 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               {menuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
+
+          {/* Event status sub-bar */}
+          {event && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/40 pt-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Event status
+              </span>
+              <EventStatusControl
+                status={event.status}
+                updating={statusUpdating}
+                onChange={updateEventStatus}
+              />
+            </div>
+          )}
 
           {/* Mobile drawer */}
           <AnimatePresence initial={false}>

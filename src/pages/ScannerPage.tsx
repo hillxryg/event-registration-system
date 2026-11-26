@@ -79,14 +79,27 @@ export default function ScannerPage() {
       const slug = getSlugFromPath();
       const base = supabase
         .from('events')
-        .select('id, slug, title, event_date, venue, is_active')
-        .eq('is_active', true);
+        .select('id, slug, title, event_date, venue, status')
+        .in('status', ['active', 'closed']);
       const { data, error } = slug
         ? await base.eq('slug', slug).single()
         : await base.order('event_date', { ascending: true }).limit(1).single();
       if (cancelled) return;
-      if (error || !data) setEventError('No active event found for this link.');
-      else setEvent(data as EventItem);
+      if (error || !data) {
+        if (slug) {
+          const { data: lookup } = await supabase
+            .from('events')
+            .select('status')
+            .eq('slug', slug)
+            .maybeSingle();
+          if (cancelled) return;
+          if (lookup?.status === 'cancelled') {
+            setEventError('This event has been cancelled.');
+            return;
+          }
+        }
+        setEventError('No active event found for this link.');
+      } else setEvent(data as EventItem);
     })();
     return () => {
       cancelled = true;
