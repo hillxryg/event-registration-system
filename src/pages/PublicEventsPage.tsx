@@ -69,11 +69,9 @@ function formatEventDate(iso: string) {
 
 interface PublicEventsPageProps {
   viewer?: UserProfile | null;
-  /** Render inside AdminShell (drops the standalone background and top padding). */
-  embedded?: boolean;
 }
 
-export default function PublicEventsPage({ viewer = null, embedded = false }: PublicEventsPageProps) {
+export default function PublicEventsPage({ viewer = null }: PublicEventsPageProps) {
   const [publicEvents, setPublicEvents] = useState<EventItem[]>([]);
   const [directoryLoading, setDirectoryLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -82,6 +80,7 @@ export default function PublicEventsPage({ viewer = null, embedded = false }: Pu
 
   useEffect(() => {
     let cancelled = false;
+    const viewerEmail = viewer?.email ?? null;
     setLoadError(null);
     setDirectoryLoading(true);
 
@@ -107,11 +106,6 @@ export default function PublicEventsPage({ viewer = null, embedded = false }: Pu
         return;
       }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (cancelled) return;
-
       const regMap: Record<string, Attendee> = {};
 
       // 1. Check persisted localStorage ticket IDs for returning unauthenticated guests
@@ -130,11 +124,11 @@ export default function PublicEventsPage({ viewer = null, embedded = false }: Pu
       }
 
       // 2. Override/fill with signed-in user's email matches
-      if (user?.email) {
+      if (viewerEmail) {
         const { data: regs } = await supabase
           .from('attendees')
           .select('*')
-          .ilike('email', escapeLike(user.email))
+          .ilike('email', escapeLike(viewerEmail))
           .in('event_id', list.map((e) => e.id));
         if (cancelled) return;
         for (const r of (regs ?? []) as Attendee[]) {
@@ -148,7 +142,7 @@ export default function PublicEventsPage({ viewer = null, embedded = false }: Pu
     return () => {
       cancelled = true;
     };
-  }, [viewer?.id]);
+  }, [viewer?.id, viewer?.email]);
 
   const visibleEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -158,12 +152,8 @@ export default function PublicEventsPage({ viewer = null, embedded = false }: Pu
     );
   }, [publicEvents, query]);
 
-  const shell = embedded
-    ? 'min-w-0 pb-4'
-    : 'pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16';
-
   return (
-    <div className={shell}>
+    <div className="min-w-0 pb-4">
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}

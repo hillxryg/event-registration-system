@@ -25,7 +25,7 @@ import type {
   UserProfile,
 } from '../types/database';
 import { supabase } from '../lib/supabase';
-import AdminShell from '../components/AdminShell';
+import { useShellScannerSlug } from '../components/AppShell';
 
 interface AdminDashboardPageProps {
   profile: UserProfile;
@@ -408,7 +408,7 @@ interface EventStats {
   pending: number;
 }
 
-export default function AdminDashboardPage({ profile, onSignOut }: AdminDashboardPageProps) {
+export default function AdminDashboardPage({ profile }: AdminDashboardPageProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -677,8 +677,10 @@ export default function AdminDashboardPage({ profile, onSignOut }: AdminDashboar
 
   const greetingName = profile.full_name?.trim().split(/\s+/)[0] || 'Admin';
 
+  useShellScannerSlug(activeScannerSlug);
+
   return (
-    <AdminShell profile={profile} onSignOut={onSignOut} activeScannerSlug={activeScannerSlug}>
+    <>
       <div className="mx-auto max-w-7xl space-y-4">
         {/* Greeting & action header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1285,6 +1287,6 @@ export default function AdminDashboardPage({ profile, onSignOut }: AdminDashboar
           </motion.div>
         )}
       </AnimatePresence>
-    </AdminShell>
+    </>
   );
 }

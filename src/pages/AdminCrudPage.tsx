@@ -31,7 +31,7 @@ import type {
   RegistrationStatus,
 } from '../types/database';
 import { supabase } from '../lib/supabase';
-import AdminShell from '../components/AdminShell';
+import { useShellScannerSlug } from '../components/AppShell';
 
 interface AdminCrudPageProps {
   profile: UserProfile;
@@ -602,7 +602,7 @@ function EventDropdown({ events, selectedId, loading, onSelect, className = '' }
   );
 }
 
-export default function AdminCrudPage({ profile, onSignOut }: AdminCrudPageProps) {
+export default function AdminCrudPage(_props: AdminCrudPageProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [eventId, setEventId] = useState('');
@@ -1284,12 +1284,10 @@ export default function AdminCrudPage({ profile, onSignOut }: AdminCrudPageProps
 
   const activeFilterLabel = filters.find((f) => f.key === filter)?.label ?? 'All';
 
+  useShellScannerSlug(event?.slug ?? null);
+
   return (
-    <AdminShell
-      profile={profile}
-      onSignOut={onSignOut}
-      activeScannerSlug={event?.slug ?? null}
-    >
+    <>
       <div className="mx-auto max-w-7xl space-y-4">
         {/* Workspace header + toolbar */}
         <section className="liquid-glass relative z-30 overflow-visible! rounded-3xl">
@@ -2363,6 +2361,6 @@ export default function AdminCrudPage({ profile, onSignOut }: AdminCrudPageProps
           </motion.div>
         )}
       </AnimatePresence>
-    </AdminShell>
+    </>
   );
 }
