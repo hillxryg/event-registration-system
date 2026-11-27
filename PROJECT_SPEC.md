@@ -7,7 +7,8 @@
   - Phase 5: Guest Dashboard (`GuestDashboardPage.tsx` at `/my-passes`), `localStorage` pass persistence (`passflow_ticket_${event.id}`), magic-link OTP authentication in `AuthPage.tsx`, `'cancelled'` registration status & RLS self-cancellation trigger
   - Phase 6: PassFlow Branding & Logo (`/passflow-logo.svg`), Mobile Hamburger Navigation, Responsive Card Grids (`GuestDashboardPage` & `RegisterPage`), & Signed-In / Duplicate Registration Detection
   - Phase 7A: Production Deployment on Vercel (`https://passflow-events.vercel.app`) with SPA routing (`vercel.json`), Supabase Auth URL configuration (`Site URL` + `/**` wildcard redirect), Custom Gmail SMTP for Supabase Auth, & PassFlow-branded Magic Link HTML email template
-- **Active:** Phase 7B — Custom Themed Form Validation (`noValidate` + inline rose error states on `AdminPage` New Event modal and `AuthPage` login/signup/magic-link forms) & Final E2E Verification
+  - Phase 7B: Custom Themed Form Validation (`noValidate` + inline rose error states on `AdminPage` New Event modal and `AuthPage` login/signup/magic-link forms) & Admin Event Deletion (`Delete Event` confirmation modal + cascade delete)
+- **Active:** Phase 7C — Admin Guest-List CRUD (`+ Add Guest` walk-in modal with optional `send-ticket-email`, `Edit Guest` modal with email re-send, & `Delete Guest` confirmation modal in `AdminPage.tsx`) & Final E2E Verification
 
 ## Current File Tree
 ```text
@@ -22,7 +23,7 @@ event-checkin/
 │   │   ├── GuestDashboardPage.tsx # Guest `/my-passes` dashboard with responsive filter menu/pills, QR pass modal, & attendance cancellation
 │   │   ├── RegisterPage.tsx  # Public directory (`/register`) + event registration (`/register/:slug`) with `localStorage` pass persistence & `send-ticket-email` invocation
 │   │   ├── ScannerPage.tsx   # Allows `active` and `closed` events; blocks `cancelled` events
-│   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status selector, validated New Event modal, & attendee approval (`send-ticket-email` trigger)
+│   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status & deletion controls, validated New Event modal, & full attendee CRUD (`send-ticket-email` trigger)
 │   ├── types/
 │   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus (`approved` | `pending` | `declined` | `cancelled`), UserProfile, EventItem, Attendee, CheckInResponse
 │   ├── App.tsx               # Public `/register` & `/register/:slug` routes, protected `/my-passes` & `/admin` routes, & role-based routing

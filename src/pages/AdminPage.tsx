@@ -22,6 +22,8 @@ import {
   ShieldCheck,
   Trash2,
   AlertTriangle,
+  UserPlus,
+  Pencil,
 } from 'lucide-react';
 import type {
   UserProfile,
@@ -42,6 +44,11 @@ type Filter = 'all' | 'pending_approval' | 'checked_in' | 'pending';
 
 type FieldKey = 'title' | 'venue' | 'date' | 'pin';
 type FieldErrors = Partial<Record<FieldKey, string>>;
+
+type GuestFieldKey = 'full_name' | 'email';
+type GuestFieldErrors = Partial<Record<GuestFieldKey, string>>;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const INVALID_INPUT =
   'border-rose-400/90 bg-rose-50/60 ring-2 ring-rose-400/35 text-rose-900 placeholder:text-rose-400';
@@ -606,6 +613,19 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const [copied, setCopied] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [guestModal, setGuestModal] = useState<'add' | 'edit' | null>(null);
+  const [editTarget, setEditTarget] = useState<Attendee | null>(null);
+  const [guestDeleteTarget, setGuestDeleteTarget] = useState<Attendee | null>(null);
+  const [guestSaving, setGuestSaving] = useState(false);
+  const [guestDeleting, setGuestDeleting] = useState(false);
+  const [guestErrors, setGuestErrors] = useState<GuestFieldErrors>({});
+  const [guestForm, setGuestForm] = useState({
+    full_name: '',
+    email: '',
+    organization: '',
+    contact_number: '',
+    sendEmail: true,
+  });
   const [form, setForm] = useState<{
     title: string;
     venue: string;
@@ -657,6 +677,23 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [deleteOpen, deleting]);
+
+  useEffect(() => {
+    if (!guestModal && !guestDeleteTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (guestDeleteTarget) {
+        if (!guestDeleting) setGuestDeleteTarget(null);
+      } else if (!guestSaving) {
+        setGuestModal(null);
+        setEditTarget(null);
+        setGuestErrors({});
+        setFormError(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [guestModal, guestDeleteTarget, guestSaving, guestDeleting]);
 
   useEffect(() => {
     let cancelled = false;
@@ -837,6 +874,153 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     link.download = `${event?.slug ?? 'event'}-attendees.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const clearGuestError = (key: GuestFieldKey) =>
+    setGuestErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  const guestDbError = (err: { code?: string; message: string }) => {
+    if (err.code === '23505') {
+      return /ticket_code/i.test(err.message)
+        ? 'Ticket code collision. Please submit again.'
+        : 'A guest with this email is already registered for this event.';
+    }
+    return err.message;
+  };
+
+  const openAddGuest = () => {
+    if (!event) return;
+    setGuestForm({ full_name: '', email: '', organization: '', contact_number: '', sendEmail: true });
+    setGuestErrors({});
+    setFormError(null);
+    setEditTarget(null);
+    setGuestModal('add');
+  };
+
+  const openEditGuest = (a: Attendee) => {
+    setGuestForm({
+      full_name: a.full_name,
+      email: a.email,
+      organization: a.organization ?? '',
+      contact_number: a.contact_number ?? '',
+      sendEmail: false,
+    });
+    setGuestErrors({});
+    setFormError(null);
+    setEditTarget(a);
+    setGuestModal('edit');
+  };
+
+  const closeGuestModal = () => {
+    if (guestSaving) return;
+    setGuestModal(null);
+    setEditTarget(null);
+    setGuestErrors({});
+    setFormError(null);
+  };
+
+  const validateGuest = (): GuestFieldErrors => {
+    const errors: GuestFieldErrors = {};
+    if (!guestForm.full_name.trim()) errors.full_name = 'Full name is required.';
+    const email = guestForm.email.trim();
+    if (!email) errors.email = 'Email is required.';
+    else if (!EMAIL_RE.test(email)) errors.email = 'Enter a valid email address.';
+    return errors;
+  };
+
+  const sendTicketEmail = async (attendeeId: string, okMessage: string) => {
+    const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
+      body: { attendee_id: attendeeId },
+    });
+    if (fnError) setError(`${okMessage}, but the ticket email failed to send.`);
+  };
+
+  const addGuest = async () => {
+    if (!event) return false;
+    const { data, error } = await supabase
+      .from('attendees')
+      .insert({
+        event_id: event.id,
+        ticket_code: `PASS-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+        full_name: guestForm.full_name.trim(),
+        email: guestForm.email.trim().toLowerCase(),
+        organization: guestForm.organization.trim() || 'Walk-In',
+        contact_number: guestForm.contact_number.trim(),
+        status: 'approved',
+        checked_in: false,
+      })
+      .select('*')
+      .single();
+    if (error || !data) {
+      setFormError(error ? guestDbError(error) : 'Could not add guest.');
+      return false;
+    }
+    const created = data as Attendee;
+    setAttendees((prev) => [created, ...prev]);
+    if (guestForm.sendEmail) await sendTicketEmail(created.id, 'Guest added');
+    return true;
+  };
+
+  const saveGuest = async () => {
+    if (!editTarget) return false;
+    const nextEmail = guestForm.email.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from('attendees')
+      .update({
+        full_name: guestForm.full_name.trim(),
+        email: nextEmail,
+        organization: guestForm.organization.trim(),
+        contact_number: guestForm.contact_number.trim(),
+      })
+      .eq('id', editTarget.id)
+      .select('*')
+      .single();
+    if (error || !data) {
+      setFormError(error ? guestDbError(error) : 'Could not update guest.');
+      return false;
+    }
+    const updated = data as Attendee;
+    setAttendees((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    if (guestForm.sendEmail && updated.status === 'approved') {
+      await sendTicketEmail(updated.id, 'Guest updated');
+    }
+    return true;
+  };
+
+  const submitGuest = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (guestSaving) return;
+    const errors = validateGuest();
+    setGuestErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setGuestSaving(true);
+    setFormError(null);
+    const ok = guestModal === 'add' ? await addGuest() : await saveGuest();
+    setGuestSaving(false);
+    if (ok) {
+      setGuestModal(null);
+      setEditTarget(null);
+    }
+  };
+
+  const deleteGuest = async () => {
+    const target = guestDeleteTarget;
+    if (!target || guestDeleting) return;
+    setGuestDeleting(true);
+    const { error } = await supabase.from('attendees').delete().eq('id', target.id);
+    setGuestDeleting(false);
+    if (error) {
+      setError(error.message);
+      setGuestDeleteTarget(null);
+      return;
+    }
+    setAttendees((prev) => prev.filter((a) => a.id !== target.id));
+    setGuestDeleteTarget(null);
   };
 
   const createEvent = async (ev: FormEvent) => {
@@ -1169,6 +1353,15 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             </div>
 
             <button
+              type="button"
+              onClick={openAddGuest}
+              disabled={!event}
+              className="liquid-glass hidden shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium text-violet-600 disabled:opacity-50 lg:flex"
+            >
+              <UserPlus size={14} /> Add Guest
+            </button>
+
+            <button
               onClick={exportCsv}
               disabled={!event}
               className="liquid-glass hidden shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700 disabled:opacity-50 lg:flex"
@@ -1214,6 +1407,17 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                       );
                     })}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openAddGuest();
+                      setFilterDrawerOpen(false);
+                    }}
+                    disabled={!event}
+                    className="liquid-glass flex w-full shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-xs font-semibold text-violet-600 disabled:opacity-50"
+                  >
+                    <UserPlus size={14} /> Add Guest
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1276,31 +1480,49 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                       )}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {a.status === 'pending' ? (
-                        <div className="flex justify-end gap-2">
+                      <div className="flex items-center justify-end gap-2">
+                        {a.status === 'pending' ? (
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => updateRegistrationStatus(a.id, 'approved')}
+                              className="whitespace-nowrap rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-600"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => updateRegistrationStatus(a.id, 'declined')}
+                              className="whitespace-nowrap rounded-full bg-rose-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-600"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        ) : a.status === 'approved' ? (
                           <button
-                            onClick={() => updateRegistrationStatus(a.id, 'approved')}
-                            className="whitespace-nowrap rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-600"
+                            onClick={() => toggleCheckIn(a.id)}
+                            className="whitespace-nowrap rounded-full bg-white/70 px-4 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white"
                           >
-                            Approve
+                            {a.checked_in ? 'Undo' : 'Check In'}
                           </button>
-                          <button
-                            onClick={() => updateRegistrationStatus(a.id, 'declined')}
-                            className="whitespace-nowrap rounded-full bg-rose-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-600"
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      ) : a.status === 'approved' ? (
+                        ) : null}
                         <button
-                          onClick={() => toggleCheckIn(a.id)}
-                          className="whitespace-nowrap rounded-full bg-white/70 px-4 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white"
+                          type="button"
+                          onClick={() => openEditGuest(a)}
+                          aria-label={`Edit ${a.full_name}`}
+                          title="Edit guest"
+                          className="rounded-full bg-white/70 p-2 text-slate-600 transition hover:bg-white hover:text-violet-600"
                         >
-                          {a.checked_in ? 'Undo' : 'Check In'}
+                          <Pencil size={14} />
                         </button>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => setGuestDeleteTarget(a)}
+                          aria-label={`Delete ${a.full_name}`}
+                          title="Delete guest"
+                          className="rounded-full bg-white/70 p-2 text-slate-600 transition hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1458,6 +1680,207 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 {creating ? 'Creating…' : 'Create Event'}
               </button>
             </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add / Edit Guest modal */}
+      <AnimatePresence>
+        {guestModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm sm:items-center"
+            onClick={closeGuestModal}
+          >
+            <motion.form
+              onSubmit={submitGuest}
+              noValidate
+              onClick={(e) => e.stopPropagation()}
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.97 }}
+              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-800">
+                  {guestModal === 'add' ? 'Add Walk-In Guest' : 'Edit Guest'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={closeGuestModal}
+                  aria-label="Close"
+                  className="rounded-full bg-white/60 p-2 text-slate-600"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div>
+                <input
+                  value={guestForm.full_name}
+                  onChange={(e) => {
+                    setGuestForm({ ...guestForm, full_name: e.target.value });
+                    if (e.target.value.trim()) clearGuestError('full_name');
+                  }}
+                  placeholder="Full name"
+                  aria-invalid={!!guestErrors.full_name}
+                  aria-describedby={guestErrors.full_name ? 'guest-name-error' : undefined}
+                  className={`liquid-pill-input w-full ${guestErrors.full_name ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="guest-name-error" message={guestErrors.full_name} />
+              </div>
+
+              <div>
+                <input
+                  type="email"
+                  value={guestForm.email}
+                  onChange={(e) => {
+                    const email = e.target.value;
+                    setGuestForm((f) => ({
+                      ...f,
+                      email,
+                      ...(guestModal === 'edit' && editTarget?.status === 'approved'
+                        ? {
+                            sendEmail:
+                              email.trim().toLowerCase() !== editTarget.email.toLowerCase(),
+                          }
+                        : {}),
+                    }));
+                    if (EMAIL_RE.test(email.trim())) clearGuestError('email');
+                  }}
+                  placeholder="Email address"
+                  aria-invalid={!!guestErrors.email}
+                  aria-describedby={guestErrors.email ? 'guest-email-error' : undefined}
+                  className={`liquid-pill-input w-full ${guestErrors.email ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="guest-email-error" message={guestErrors.email} />
+              </div>
+
+              <input
+                value={guestForm.organization}
+                onChange={(e) => setGuestForm({ ...guestForm, organization: e.target.value })}
+                placeholder={guestModal === 'add' ? 'Organization (defaults to Walk-In)' : 'Organization'}
+                className="liquid-pill-input w-full"
+              />
+
+              <input
+                value={guestForm.contact_number}
+                onChange={(e) => setGuestForm({ ...guestForm, contact_number: e.target.value })}
+                placeholder="Contact number (optional)"
+                inputMode="tel"
+                className="liquid-pill-input w-full"
+              />
+
+              {(guestModal === 'add' || editTarget?.status === 'approved') && (
+                <label className="liquid-glass flex cursor-pointer items-center gap-3 rounded-2xl px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={guestForm.sendEmail}
+                    onChange={(e) => setGuestForm({ ...guestForm, sendEmail: e.target.checked })}
+                    className="size-4 accent-violet-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">
+                    {guestModal === 'add' ? 'Send QR pass via email' : 'Re-send QR ticket email'}
+                  </span>
+                </label>
+              )}
+
+              {formError && (
+                <p role="alert" className="text-xs font-semibold text-rose-600">
+                  {formError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={guestSaving}
+                className="liquid-btn-primary w-full disabled:opacity-60"
+              >
+                {guestSaving
+                  ? guestModal === 'add'
+                    ? 'Adding…'
+                    : 'Saving…'
+                  : guestModal === 'add'
+                    ? 'Add Guest'
+                    : 'Save Changes'}
+              </button>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Guest confirmation modal */}
+      <AnimatePresence>
+        {guestDeleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
+            onClick={() => !guestDeleting && setGuestDeleteTarget(null)}
+          >
+            <motion.div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-guest-title"
+              aria-describedby="delete-guest-desc"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.97 }}
+              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100/90 text-rose-600">
+                  <AlertTriangle size={20} />
+                </span>
+                <div className="min-w-0">
+                  <h2 id="delete-guest-title" className="text-lg font-semibold text-slate-800">
+                    Remove this guest?
+                  </h2>
+                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
+                    {guestDeleteTarget.full_name}
+                  </p>
+                  <p className="break-all text-xs text-slate-500">{guestDeleteTarget.email}</p>
+                  <p className="mt-1 font-mono text-xs text-slate-600">
+                    {guestDeleteTarget.ticket_code}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-rose-50/60 px-4 py-3 ring-2 ring-rose-400/35">
+                <p id="delete-guest-desc" className="text-sm text-slate-700">
+                  Removing this guest{' '}
+                  <span className="font-semibold text-rose-600">
+                    permanently deletes their registration and QR pass
+                  </span>
+                  . This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setGuestDeleteTarget(null)}
+                  disabled={guestDeleting}
+                  className="liquid-glass rounded-full px-5 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteGuest}
+                  disabled={guestDeleting}
+                  className="flex items-center justify-center gap-1.5 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:opacity-60"
+                >
+                  <Trash2 size={14} />
+                  {guestDeleting ? 'Removing…' : 'Delete Guest'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
