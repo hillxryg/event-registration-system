@@ -9,6 +9,22 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+function getServiceKey(): string {
+  const rawSecretKeys = Deno.env.get('SUPABASE_SECRET_KEYS');
+  if (rawSecretKeys) {
+    try {
+      const parsed = JSON.parse(rawSecretKeys) as Record<string, string>;
+      const secret = Object.values(parsed).find(
+        (v) => typeof v === 'string' && v.startsWith('sb_secret_'),
+      );
+      if (secret) return secret;
+    } catch {
+      if (rawSecretKeys.startsWith('sb_secret_')) return rawSecretKeys;
+    }
+  }
+  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -50,11 +66,13 @@ Deno.serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const serviceRoleKey = getServiceKey();
     const gmailUser = Deno.env.get('GMAIL_USER')!;
     const gmailPass = Deno.env.get('GMAIL_APP_PASSWORD')!;
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { data: attendee, error: attendeeErr } = await supabase
       .from('attendees')
@@ -63,10 +81,17 @@ Deno.serve(async (req) => {
       .single();
 
     if (attendeeErr || !attendee) {
-      return new Response(JSON.stringify({ error: 'Attendee not found.' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          error: 'Attendee not found.',
+          details: attendeeErr?.message ?? null,
+          code: attendeeErr?.code ?? null,
+        }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
+      );
     }
 
     if (attendee.status !== 'approved') {
