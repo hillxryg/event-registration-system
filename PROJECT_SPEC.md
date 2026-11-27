@@ -5,9 +5,9 @@
   - Phase 1–3D: Supabase Schema (`profiles`, `events`, `attendees`), Liquid-Glass UI, Auth + Role Routing, Live DB Queries, Shareable `/register/:slug` Invite Links, Public Events Directory (`/register`), Exclusive Event Admin Approval Workflow (`approved` / `pending` / `declined`), & Event Lifecycle Status (`active` | `closed` | `cancelled`) with Searchable, Status-Filtered Event Switcher in `AdminPage`
   - Phase 4: Supabase Edge Function (`send-ticket-email`) + Gmail SMTP (`nodemailer` + `qrcode` inline CID PNG attachment) automated HTML QR ticket delivery triggered on instant public approval or when admin approves a pending exclusive guest; public unauthenticated access to `/register` and `/register/:slug`
   - Phase 5: Guest Dashboard (`GuestDashboardPage.tsx` at `/my-passes`), `localStorage` pass persistence (`passflow_ticket_${event.id}`), magic-link OTP authentication in `AuthPage.tsx`, `'cancelled'` registration status & RLS self-cancellation trigger
-- **Active:** Phase 6 — PassFlow Branding & Logo (`/passflow-logo.svg`), Mobile Hamburger Navigation, Responsive Card Grids (`GuestDashboardPage` & `RegisterPage`), & Signed-In / Duplicate Registration Detection
-- **Upcoming:**
-  - Phase 7: End-to-End Testing & Deployment
+  - Phase 6: PassFlow Branding & Logo (`/passflow-logo.svg`), Mobile Hamburger Navigation, Responsive Card Grids (`GuestDashboardPage` & `RegisterPage`), & Signed-In / Duplicate Registration Detection
+  - Phase 7A: Production Deployment on Vercel (`https://passflow-events.vercel.app`) with SPA routing (`vercel.json`), Supabase Auth URL configuration (`Site URL` + `/**` wildcard redirect), Custom Gmail SMTP for Supabase Auth, & PassFlow-branded Magic Link HTML email template
+- **Active:** Phase 7B — Custom Themed Form Validation (`noValidate` + inline rose error states on `AdminPage` New Event modal and `AuthPage` login/signup/magic-link forms) & Final E2E Verification
 
 ## Current File Tree
 ```text
@@ -18,11 +18,11 @@ event-checkin/
 │   ├── lib/
 │   │   └── supabase.ts       # Exports `supabase` and `fetchUserProfile`
 │   ├── pages/
-│   │   ├── AuthPage.tsx      # Supabase `signInWithPassword`, `signUp`, & `signInWithOtp` (magic link) with redirect persistence
-│   │   ├── GuestDashboardPage.tsx # Guest `/my-passes` dashboard with status filter pills, QR pass modal, & attendance cancellation
+│   │   ├── AuthPage.tsx      # Supabase `signInWithPassword`, `signUp`, & `signInWithOtp` (magic link) with custom themed validation & redirect persistence
+│   │   ├── GuestDashboardPage.tsx # Guest `/my-passes` dashboard with responsive filter menu/pills, QR pass modal, & attendance cancellation
 │   │   ├── RegisterPage.tsx  # Public directory (`/register`) + event registration (`/register/:slug`) with `localStorage` pass persistence & `send-ticket-email` invocation
 │   │   ├── ScannerPage.tsx   # Allows `active` and `closed` events; blocks `cancelled` events
-│   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status selector, & attendee approval (`send-ticket-email` trigger)
+│   │   └── AdminPage.tsx     # Searchable + status-filtered `EventDropdown`, event status selector, validated New Event modal, & attendee approval (`send-ticket-email` trigger)
 │   ├── types/
 │   │   └── database.ts       # UserRole, EventVisibility, EventStatus, RegistrationStatus (`approved` | `pending` | `declined` | `cancelled`), UserProfile, EventItem, Attendee, CheckInResponse
 │   ├── App.tsx               # Public `/register` & `/register/:slug` routes, protected `/my-passes` & `/admin` routes, & role-based routing
@@ -32,6 +32,8 @@ event-checkin/
 │   │   └── send-ticket-email/
 │   │       └── index.ts      # Edge Function generating inline PNG QR via `qrcode` and sending HTML pass via Gmail SMTP (`nodemailer`)
 │   └── schema.sql
+├── index.html                # PassFlow title & /passflow-logo.svg favicon
+├── vercel.json               # SPA catch-all rewrite to /index.html
 └── PROJECT_SPEC.md
 ```
 
@@ -44,6 +46,7 @@ event-checkin/
 ## Visual Design Tokens (Already defined in src/index.css)
 - Mesh Gradient Colors: Vanilla Cream #F6E9CC, Baby Blue #D0E7F6, Cotton Candy #F0C9EF, Rose Quartz #F1C9CF, Lavender #BBAEEC
 - Available CSS Classes: .pastel-mesh-bg, .liquid-glass, .liquid-glass-dark, .liquid-pill-input, .liquid-btn-primary
+- Validation Error Accent: Soft rose glass border/ring (border-rose-400/90 bg-rose-50/60 ring-2 ring-rose-400/35) with inline text-xs font-semibold text-rose-600 messages (always use noValidate on forms instead of native browser tooltips)
 - QR Safe Zone: Always render QRCodeSVG inside a solid pure-white rounded square (bg-white p-4 rounded-2xl).
 
 ## Updated Data Contracts (src/types/database.ts)

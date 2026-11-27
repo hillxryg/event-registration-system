@@ -9,6 +9,22 @@ interface AuthPageProps {
 }
 
 type Mode = 'signin' | 'signup' | 'magic';
+type FieldKey = 'fullName' | 'email' | 'password';
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MIN_PASSWORD_LENGTH = 6;
+const INVALID_INPUT =
+  'border-rose-400/90 bg-rose-50/60 ring-2 ring-rose-400/35 text-rose-900 placeholder:text-rose-400';
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" className="mt-1.5 px-4 text-xs font-semibold text-rose-600">
+      {message}
+    </p>
+  );
+}
 
 const MODES: { key: Mode; label: string }[] = [
   { key: 'signin', label: 'Sign In' },
@@ -63,6 +79,28 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  const clearFieldError = (key: FieldKey) =>
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  const validate = (): FieldErrors => {
+    const errors: FieldErrors = {};
+    if (mode === 'signup' && !fullName.trim()) errors.fullName = 'Full name is required.';
+    if (!email.trim()) errors.email = 'Email is required.';
+    else if (!EMAIL_RE.test(email.trim())) errors.email = 'Enter a valid email address.';
+    if (mode !== 'magic') {
+      if (!password.trim()) errors.password = 'Password is required.';
+      else if (mode === 'signup' && password.length < MIN_PASSWORD_LENGTH)
+        errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    }
+    return errors;
+  };
 
   const completeAuth = async (userId: string) => {
     const profile = await loadProfileWithRetry(userId);
@@ -77,14 +115,9 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
     ev.preventDefault();
     setError(null);
     setNotice(null);
-    if (!email.trim() || (mode !== 'magic' && !password.trim())) {
-      setError(mode === 'magic' ? 'Email is required.' : 'Email and password are required.');
-      return;
-    }
-    if (mode === 'signup' && !fullName.trim()) {
-      setError('Please enter your full name.');
-      return;
-    }
+    const errors = validate();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     setSubmitting(true);
     try {
@@ -202,6 +235,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                   setMode(m.key);
                   setError(null);
                   setNotice(null);
+                  setFieldErrors({});
                 }}
                 className="relative z-10 flex-1 rounded-full px-3 py-2 text-xs sm:text-sm font-medium"
               >
@@ -219,7 +253,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
             ))}
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
             <AnimatePresence initial={false}>
               {mode === 'signup' && (
                 <motion.div
@@ -227,7 +261,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
+                  className="-mx-1 -my-1 overflow-hidden px-1 py-1"
                 >
                   <div className="relative">
                     <span className={iconBadge}>
@@ -236,43 +270,69 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                     <input
                       type="text"
                       value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
+                      onChange={(e) => {
+                        setFullName(e.target.value);
+                        if (e.target.value.trim()) clearFieldError('fullName');
+                      }}
                       placeholder="Full name"
                       autoComplete="name"
-                      className="liquid-pill-input w-full pl-14"
+                      aria-invalid={!!fieldErrors.fullName}
+                      aria-describedby={fieldErrors.fullName ? 'auth-fullname-error' : undefined}
+                      className={`liquid-pill-input w-full pl-14 ${fieldErrors.fullName ? INVALID_INPUT : ''}`}
                     />
                   </div>
+                  <FieldError id="auth-fullname-error" message={fieldErrors.fullName} />
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <div className="relative">
-              <span className={iconBadge}>
-                <Mail size={16} />
-              </span>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email address"
-                autoComplete="email"
-                className="liquid-pill-input w-full pl-14"
-              />
+            <div>
+              <div className="relative">
+                <span className={iconBadge}>
+                  <Mail size={16} />
+                </span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (EMAIL_RE.test(e.target.value.trim())) clearFieldError('email');
+                  }}
+                  placeholder="Email address"
+                  autoComplete="email"
+                  aria-invalid={!!fieldErrors.email}
+                  aria-describedby={fieldErrors.email ? 'auth-email-error' : undefined}
+                  className={`liquid-pill-input w-full pl-14 ${fieldErrors.email ? INVALID_INPUT : ''}`}
+                />
+              </div>
+              <FieldError id="auth-email-error" message={fieldErrors.email} />
             </div>
 
             {mode !== 'magic' && (
-              <div className="relative">
-                <span className={iconBadge}>
-                  <Lock size={16} />
-                </span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                  className="liquid-pill-input w-full pl-14"
-                />
+              <div>
+                <div className="relative">
+                  <span className={iconBadge}>
+                    <Lock size={16} />
+                  </span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (
+                        e.target.value.trim() &&
+                        (mode !== 'signup' || e.target.value.length >= MIN_PASSWORD_LENGTH)
+                      )
+                        clearFieldError('password');
+                    }}
+                    placeholder="Password"
+                    autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                    aria-invalid={!!fieldErrors.password}
+                    aria-describedby={fieldErrors.password ? 'auth-password-error' : undefined}
+                    className={`liquid-pill-input w-full pl-14 ${fieldErrors.password ? INVALID_INPUT : ''}`}
+                  />
+                </div>
+                <FieldError id="auth-password-error" message={fieldErrors.password} />
               </div>
             )}
 

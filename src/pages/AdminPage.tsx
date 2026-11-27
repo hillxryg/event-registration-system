@@ -38,6 +38,21 @@ interface AdminPageProps {
 
 type Filter = 'all' | 'pending_approval' | 'checked_in' | 'pending';
 
+type FieldKey = 'title' | 'venue' | 'date' | 'pin';
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+const INVALID_INPUT =
+  'border-rose-400/90 bg-rose-50/60 ring-2 ring-rose-400/35 text-rose-900 placeholder:text-rose-400';
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" className="mt-1.5 px-4 text-xs font-semibold text-rose-600">
+      {message}
+    </p>
+  );
+}
+
 const REG_STATUS_UI: Record<RegistrationStatus, { label: string; cls: string }> = {
   pending: { label: 'Pending Approval', cls: 'bg-amber-100/90 text-amber-700' },
   approved: { label: 'Approved', cls: 'bg-emerald-100/90 text-emerald-700' },
@@ -165,7 +180,17 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 1);
 const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
 
-function DateTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function DateTimePicker({
+  value,
+  onChange,
+  invalid = false,
+  describedBy,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  invalid?: boolean;
+  describedBy?: string;
+}) {
   const parsed = parseLocal(value);
   const today = new Date();
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -246,13 +271,19 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="liquid-pill-input flex w-full items-center gap-2 text-left"
+        aria-invalid={invalid}
+        aria-describedby={describedBy}
+        className={`liquid-pill-input flex w-full items-center gap-2 text-left ${invalid ? INVALID_INPUT : ''}`}
       >
         <Calendar size={16} className="shrink-0 text-violet-500" />
-        <span className={`min-w-0 flex-1 truncate ${parsed ? 'text-slate-800' : 'text-slate-500'}`}>
+        <span
+          className={`min-w-0 flex-1 truncate ${
+            parsed ? 'text-slate-800' : invalid ? 'text-rose-400' : 'text-slate-500'
+          }`}
+        >
           {label}
         </span>
-        <Clock size={16} className="shrink-0 text-slate-400" />
+        <Clock size={16} className={`shrink-0 ${invalid ? 'text-rose-400' : 'text-slate-400'}`} />
       </button>
 
       <AnimatePresence>
@@ -564,6 +595,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const [creating, setCreating] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -577,6 +609,36 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     pin: string;
     visibility: EventVisibility;
   }>({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
+
+  const openModal = () => {
+    setFieldErrors({});
+    setFormError(null);
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setFieldErrors({});
+    setFormError(null);
+    setModalOpen(false);
+  };
+
+  const clearFieldError = (key: FieldKey) =>
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  const validateForm = (): FieldErrors => {
+    const errors: FieldErrors = {};
+    if (!form.title.trim()) errors.title = 'Event title is required.';
+    if (!form.venue.trim()) errors.venue = 'Venue is required.';
+    if (!form.date || !parseLocal(form.date)) errors.date = 'Pick a date and time for the event.';
+    if (!form.pin) errors.pin = 'Scanner PIN is required.';
+    else if (!/^\d{4}$/.test(form.pin)) errors.pin = 'Scanner PIN must be exactly 4 digits.';
+    return errors;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -655,7 +717,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, status } : e)));
   };
 
- const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
+  const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
     const { error } = await supabase.from('attendees').update({ status }).eq('id', id);
     if (error) {
       setError(error.message);
@@ -741,15 +803,10 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
 
   const createEvent = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (!form.date) {
-      setFormError('Pick a date and time for the event.');
-      return;
-    }
-    if (!form.title.trim() || !form.venue.trim() || creating) return;
-    if (form.pin && form.pin.length !== 4) {
-      setFormError('Scanner PIN must be exactly 4 digits.');
-      return;
-    }
+    if (creating) return;
+    const errors = validateForm();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setCreating(true);
     setFormError(null);
     const slug = form.title
@@ -766,7 +823,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
         event_date: new Date(form.date).toISOString(),
         venue: form.venue.trim(),
         visibility: form.visibility,
-        scanner_pin: form.pin || '1234',
+        scanner_pin: form.pin,
         status: 'active',
       })
       .select('*')
@@ -786,7 +843,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     );
     setEventId(created.id);
     setForm({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
-    setModalOpen(false);
+    closeModal();
   };
 
   const filters: { key: Filter; label: string }[] = [
@@ -929,7 +986,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               className="w-full min-w-0 sm:w-auto sm:max-w-xs sm:flex-1"
             />
             <button
-              onClick={() => setModalOpen(true)}
+              onClick={openModal}
               className="liquid-btn-primary flex shrink-0 items-center gap-1.5 whitespace-nowrap"
             >
               <Plus size={16} /> New Event
@@ -1221,10 +1278,11 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm sm:items-center"
-            onClick={() => setModalOpen(false)}
+            onClick={closeModal}
           >
             <motion.form
               onSubmit={createEvent}
+              noValidate
               onClick={(e) => e.stopPropagation()}
               initial={{ opacity: 0, y: 24, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1235,40 +1293,74 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 <h2 className="text-lg font-semibold text-slate-800">New Event</h2>
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
+                  onClick={closeModal}
                   aria-label="Close"
                   className="rounded-full bg-white/60 p-2 text-slate-600"
                 >
                   <X size={16} />
                 </button>
               </div>
-              <input
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="Event title"
-                className="liquid-pill-input w-full"
-                required
-              />
-              <input
-                value={form.venue}
-                onChange={(e) => setForm({ ...form, venue: e.target.value })}
-                placeholder="Venue"
-                className="liquid-pill-input w-full"
-                required
-              />
-              <DateTimePicker
-                value={form.date}
-                onChange={(date) => setForm((f) => ({ ...f, date }))}
-              />
-              <input
-                value={form.pin}
-                onChange={(e) =>
-                  setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })
-                }
-                placeholder="4-digit scanner PIN"
-                inputMode="numeric"
-                className="liquid-pill-input w-full"
-              />
+
+              <div>
+                <input
+                  value={form.title}
+                  onChange={(e) => {
+                    setForm({ ...form, title: e.target.value });
+                    if (e.target.value.trim()) clearFieldError('title');
+                  }}
+                  placeholder="Event title"
+                  aria-invalid={!!fieldErrors.title}
+                  aria-describedby={fieldErrors.title ? 'event-title-error' : undefined}
+                  className={`liquid-pill-input w-full ${fieldErrors.title ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="event-title-error" message={fieldErrors.title} />
+              </div>
+
+              <div>
+                <input
+                  value={form.venue}
+                  onChange={(e) => {
+                    setForm({ ...form, venue: e.target.value });
+                    if (e.target.value.trim()) clearFieldError('venue');
+                  }}
+                  placeholder="Venue"
+                  aria-invalid={!!fieldErrors.venue}
+                  aria-describedby={fieldErrors.venue ? 'event-venue-error' : undefined}
+                  className={`liquid-pill-input w-full ${fieldErrors.venue ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="event-venue-error" message={fieldErrors.venue} />
+              </div>
+
+              <div>
+                <DateTimePicker
+                  value={form.date}
+                  onChange={(date) => {
+                    setForm((f) => ({ ...f, date }));
+                    if (date) clearFieldError('date');
+                  }}
+                  invalid={!!fieldErrors.date}
+                  describedBy={fieldErrors.date ? 'event-date-error' : undefined}
+                />
+                <FieldError id="event-date-error" message={fieldErrors.date} />
+              </div>
+
+              <div>
+                <input
+                  value={form.pin}
+                  onChange={(e) => {
+                    const pin = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setForm({ ...form, pin });
+                    if (pin.length === 4) clearFieldError('pin');
+                  }}
+                  placeholder="4-digit scanner PIN"
+                  inputMode="numeric"
+                  aria-invalid={!!fieldErrors.pin}
+                  aria-describedby={fieldErrors.pin ? 'event-pin-error' : undefined}
+                  className={`liquid-pill-input w-full ${fieldErrors.pin ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="event-pin-error" message={fieldErrors.pin} />
+              </div>
+
               <div
                 role="radiogroup"
                 aria-label="Event visibility"
