@@ -328,12 +328,14 @@ function PassModal({ row, onClose }: PassModalProps) {
   );
 }
 
-interface GuestDashboardPageProps {
+interface MyPassesPageProps {
   user: UserProfile;
-  onSignOut: () => void | Promise<void>;
+  onSignOut?: () => void | Promise<void>;
+  /** Render inside AdminShell (drops the standalone background and top padding). */
+  embedded?: boolean;
 }
 
-export default function GuestDashboardPage({ user }: GuestDashboardPageProps) {
+export default function MyPassesPage({ user, embedded = false }: MyPassesPageProps) {
   const [rows, setRows] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -428,8 +430,12 @@ export default function GuestDashboardPage({ user }: GuestDashboardPageProps) {
     setCancellingId(null);
   };
 
+  const shell = embedded
+    ? 'min-w-0 pb-4'
+    : 'pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16';
+
   return (
-    <div className="pastel-mesh-bg min-h-screen px-4 pb-10 pt-24 sm:px-6 lg:px-10 lg:pb-16">
+    <div className={shell}>
       <div className="mx-auto max-w-6xl">
         <motion.header
           initial={{ opacity: 0, y: -10 }}
@@ -552,7 +558,7 @@ export default function GuestDashboardPage({ user }: GuestDashboardPageProps) {
 
           <button
             type="button"
-            onClick={() => goTo('/register')}
+            onClick={() => goTo('/events')}
             className="liquid-btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 text-sm sm:px-5"
           >
             Browse Public Events

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  LogOut,
   Plus,
   Search,
   Download,
@@ -15,18 +14,13 @@ import {
   ChevronRight,
   Copy,
   ChevronDown,
-  Menu,
   SlidersHorizontal,
-  ScanLine,
-  Ticket,
-  ShieldCheck,
   Trash2,
   AlertTriangle,
   UserPlus,
   Pencil,
   Eye,
   EyeOff,
-  QrCode,
 } from 'lucide-react';
 import type {
   UserProfile,
@@ -37,10 +31,11 @@ import type {
   RegistrationStatus,
 } from '../types/database';
 import { supabase } from '../lib/supabase';
+import AdminShell from '../components/AdminShell';
 
-interface AdminPageProps {
-  user: UserProfile;
-  onSignOut: () => void;
+interface AdminCrudPageProps {
+  profile: UserProfile;
+  onSignOut: () => void | Promise<void>;
 }
 
 type Filter = 'all' | 'pending_approval' | 'checked_in' | 'pending';
@@ -158,9 +153,13 @@ function VisibilityBadge({ visibility }: { visibility: EventVisibility }) {
   );
 }
 
-const navigate = (path: string) => {
-  window.history.pushState({}, '', path);
-  window.dispatchEvent(new PopStateEvent('popstate'));
+const readEventParam = () => new URLSearchParams(window.location.search).get('event') ?? '';
+
+const writeEventParam = (id: string) => {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set('event', id);
+  else url.searchParams.delete('event');
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 };
 
 const csvCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
@@ -603,17 +602,17 @@ function EventDropdown({ events, selectedId, loading, onSelect, className = '' }
   );
 }
 
-export default function AdminPage({ user, onSignOut }: AdminPageProps) {
+export default function AdminCrudPage({ profile, onSignOut }: AdminCrudPageProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [eventId, setEventId] = useState('');
+  const [urlEventId, setUrlEventId] = useState(readEventParam);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [menuOpen, setMenuOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -660,6 +659,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     pin: string;
     visibility: EventVisibility;
   }>({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
+
+  const selectEvent = (id: string) => {
+    setEventId(id);
+    setUrlEventId(id);
+    writeEventParam(id);
+  };
 
   const openModal = () => {
     setFieldErrors({});
@@ -800,6 +805,20 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [guestModal, guestDeleteTarget, guestSaving, guestDeleting]);
 
+  // Re-read `?event=<id>` whenever the history changes (e.g. Manage / Open in Manage links)
+  useEffect(() => {
+    const sync = () => {
+      const id = readEventParam();
+      if (id) setUrlEventId(id);
+    };
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+
+  useEffect(() => {
+    if (urlEventId && events.some((e) => e.id === urlEventId)) setEventId(urlEventId);
+  }, [urlEventId, events]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -813,7 +832,13 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
       } else {
         const list = (data ?? []) as EventItem[];
         setEvents(list);
-        setEventId((list.find((e) => e.status === 'active') ?? list[0])?.id ?? '');
+        const initial =
+          list.find((e) => e.id === readEventParam()) ??
+          list.find((e) => e.status === 'active') ??
+          list[0];
+        setEventId(initial?.id ?? '');
+        setUrlEventId(initial?.id ?? '');
+        writeEventParam(initial?.id ?? '');
       }
       setLoading(false);
     })();
@@ -844,12 +869,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   }, [eventId]);
 
   const event: EventItem | undefined = events.find((e) => e.id === eventId) ?? events[0];
-  const registerPath = event ? `/register/${event.slug}` : '/register';
-  const scannerPath = event ? `/scanner/${event.slug}` : '/scanner';
 
   const total = attendees.length;
   const checked = attendees.filter((a) => a.checked_in).length;
   const pending = attendees.filter((a) => a.status === 'approved' && !a.checked_in).length;
+  const approvedCount = attendees.filter((a) => a.status === 'approved').length;
+  const needsApproval = attendees.filter((a) => a.status === 'pending').length;
   const pct = total ? Math.round((checked / total) * 100) : 0;
 
   const visible = useMemo(() => {
@@ -890,7 +915,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     }
     const nextEvents = events.filter((e) => e.id !== deletedId);
     setEvents(nextEvents);
-    setEventId((nextEvents.find((e) => e.status === 'active') ?? nextEvents[0])?.id ?? '');
+    selectEvent((nextEvents.find((e) => e.status === 'active') ?? nextEvents[0])?.id ?? '');
     setAttendees([]);
     setQuery('');
     setFilter('all');
@@ -1245,7 +1270,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setEvents((prev) =>
       [...prev, created].sort((a, b) => a.event_date.localeCompare(b.event_date)),
     );
-    setEventId(created.id);
+    selectEvent(created.id);
     setForm({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
     closeModal();
   };
@@ -1260,162 +1285,39 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const activeFilterLabel = filters.find((f) => f.key === filter)?.label ?? 'All';
 
   return (
-    <div className="pastel-mesh-bg min-h-screen p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl space-y-4">
-        {/* Header */}
-        <header className="liquid-glass relative z-30 rounded-3xl p-3 overflow-visible! sm:p-4">
-          {/* Row 1: brand + navigation & account */}
-          <div className="flex items-center gap-3">
-            <a
-              href="/admin"
-              onClick={(e) => {
-                e.preventDefault();
-                setMenuOpen(false);
-                navigate('/admin');
-              }}
-              aria-label="PassFlow admin home"
-              className="flex shrink-0 items-center gap-2"
-            >
-              <img src="/passflow-logo.svg" alt="" className="h-8 w-8 shrink-0" />
-              <span className="text-lg font-extrabold tracking-tight text-[#18181B]">PassFlow</span>
-            </a>
-
-            {/* Desktop nav & account (xl+) */}
-            <div className="ml-auto hidden min-w-0 items-center gap-2 xl:flex">
-              <a
-                href={registerPath}
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate(registerPath);
-                }}
-                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
-              >
-                <Ticket size={14} /> Register
-              </a>
-              <a
-                href={scannerPath}
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate(scannerPath);
-                }}
-                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
-              >
-                <ScanLine size={14} /> Scanner
-              </a>
-              <a
-                href="/my-passes"
-                onClick={(e) => {
-                  e.preventDefault();
-                  navigate('/my-passes');
-                }}
-                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
-              >
-                <QrCode size={14} /> My Passes
-              </a>
-              <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
-                  <ShieldCheck size={16} />
-                </span>
-                <span className="max-w-[140px] truncate">{user.full_name ?? user.email}</span>
-              </div>
-              <button
-                onClick={onSignOut}
-                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
-              >
-                <LogOut size={14} /> Sign Out
-              </button>
+    <AdminShell
+      profile={profile}
+      onSignOut={onSignOut}
+      activeScannerSlug={event?.slug ?? null}
+    >
+      <div className="mx-auto max-w-7xl space-y-4">
+        {/* Workspace header + toolbar */}
+        <section className="liquid-glass relative z-30 overflow-visible! rounded-3xl">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/40 px-4 py-4 sm:px-6">
+            <div className="min-w-0">
+              <h1 className="text-xl font-extrabold tracking-tight text-[#18181B] sm:text-2xl">
+                Manage Events &amp; Guests
+              </h1>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
+                {event ? formatEventMeta(event) : 'Create an event to start managing guests.'}
+              </p>
             </div>
-
-            {/* Hamburger (< xl) */}
-            <button
-              type="button"
-              onClick={() => setMenuOpen((o) => !o)}
-              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-              aria-expanded={menuOpen}
-              aria-controls="admin-mobile-drawer"
-              className="liquid-glass ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-700 xl:hidden"
-            >
-              {menuOpen ? <X size={18} /> : <Menu size={18} />}
-            </button>
-          </div>
-
-          {/* Mobile drawer (< xl) */}
-          <AnimatePresence initial={false}>
-            {menuOpen && (
-              <motion.div
-                id="admin-mobile-drawer"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden xl:hidden"
-              >
-                <div className="liquid-glass mt-3 flex flex-col gap-2 rounded-2xl p-3">
-                  <a
-                    href={registerPath}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setMenuOpen(false);
-                      navigate(registerPath);
-                    }}
-                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700"
-                  >
-                    <Ticket size={14} /> Register Link
-                  </a>
-                  <a
-                    href={scannerPath}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setMenuOpen(false);
-                      navigate(scannerPath);
-                    }}
-                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700"
-                  >
-                    <ScanLine size={14} /> Scanner Link
-                  </a>
-                  <a
-                    href="/my-passes"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setMenuOpen(false);
-                      navigate('/my-passes');
-                    }}
-                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700"
-                  >
-                    <QrCode size={14} /> My Passes
-                  </a>
-                  <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
-                      <ShieldCheck size={16} />
-                    </span>
-                    <span className="min-w-0 truncate">{user.full_name ?? user.email}</span>
-                  </div>
-                  <button
-                    onClick={onSignOut}
-                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700"
-                  >
-                    <LogOut size={14} /> Sign Out
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Row 2: event context & controls */}
-          <div className="mt-3 flex flex-wrap items-center gap-2.5 border-t border-white/40 pt-3">
-            <EventDropdown
-              events={events}
-              selectedId={eventId}
-              loading={loading}
-              onSelect={setEventId}
-              className="w-full min-w-0 sm:w-auto sm:max-w-xs sm:flex-1"
-            />
             <button
               onClick={openModal}
               className="liquid-btn-primary flex shrink-0 items-center gap-1.5 whitespace-nowrap"
             >
               <Plus size={16} /> New Event
             </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 px-4 py-3 sm:px-6">
+            <EventDropdown
+              events={events}
+              selectedId={eventId}
+              loading={loading}
+              onSelect={selectEvent}
+              className="w-full min-w-0 sm:w-auto sm:max-w-xs sm:flex-1"
+            />
             <button
               type="button"
               onClick={copyInviteLink}
@@ -1456,7 +1358,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               </div>
             )}
           </div>
-        </header>
+        </section>
 
         {error && (
           <div
@@ -1475,39 +1377,45 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
           </div>
         )}
 
-        {/* KPI row */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="liquid-glass rounded-3xl p-6">
+        {/* KPI strip */}
+        <section className="liquid-glass grid divide-y divide-white/40 rounded-3xl md:grid-cols-3 md:divide-x md:divide-y-0">
+          <div className="p-5 sm:p-6">
             <div className="flex items-center justify-between text-sm text-slate-600">
               Total Registered <Users size={18} className="text-violet-500" />
             </div>
-            <p className="mt-3 text-4xl font-semibold text-slate-800">{total}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-800">{total}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              <span className="font-semibold text-emerald-600">{approvedCount}</span> approved
+            </p>
           </div>
 
-          <div className="liquid-glass-dark rounded-3xl p-6 text-white">
-            <div className="flex items-center justify-between text-sm text-white/70">
-              Checked In <UserCheck size={18} className="text-emerald-300" />
+          <div className="p-5 sm:p-6">
+            <div className="flex items-center justify-between text-sm text-slate-600">
+              Checked In <UserCheck size={18} className="text-emerald-500" />
             </div>
-            <p className="mt-3 text-4xl font-semibold">
+            <p className="mt-2 text-3xl font-semibold text-slate-800">
               {checked}
-              <span className="ml-2 text-base font-normal text-white/60">{pct}%</span>
+              <span className="ml-2 text-base font-normal text-slate-500">{pct}%</span>
             </p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/20">
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200/70">
               <motion.div
-                className="h-full rounded-full bg-emerald-300"
+                className="h-full rounded-full bg-emerald-500"
                 animate={{ width: `${pct}%` }}
                 transition={{ type: 'spring', stiffness: 120, damping: 20 }}
               />
             </div>
           </div>
 
-          <div className="liquid-glass rounded-3xl p-6">
+          <div className="p-5 sm:p-6">
             <div className="flex items-center justify-between text-sm text-slate-600">
               Pending Check-In <Clock size={18} className="text-amber-500" />
             </div>
-            <p className="mt-3 text-4xl font-semibold text-slate-800">{pending}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-800">{pending}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              <span className="font-semibold text-amber-600">{needsApproval}</span> needs approval
+            </p>
           </div>
-        </div>
+        </section>
 
         {/* Attendee management */}
         <section className="liquid-glass rounded-3xl p-4 sm:p-5">
@@ -1646,23 +1554,26 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             )}
           </AnimatePresence>
 
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-white/50">
             <table className="w-full min-w-[860px] text-left text-sm">
-              <thead className="text-xs uppercase tracking-wide text-slate-500">
+              <thead className="bg-white/40 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">Attendee</th>
-                  <th className="px-3 py-2">Organization</th>
-                  <th className="px-3 py-2">Contact</th>
-                  <th className="px-3 py-2">Ticket</th>
-                  <th className="px-3 py-2">Registration</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 text-right">Action</th>
+                  <th className="px-4 py-3">Attendee</th>
+                  <th className="px-3 py-3">Organization</th>
+                  <th className="px-3 py-3">Contact</th>
+                  <th className="px-3 py-3">Ticket</th>
+                  <th className="px-3 py-3">Registration</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((a) => (
-                  <tr key={a.id} className="border-t border-white/40 text-slate-700">
-                    <td className="px-3 py-3">
+                  <tr
+                    key={a.id}
+                    className="border-t border-white/40 text-slate-700 transition hover:bg-white/30"
+                  >
+                    <td className="px-4 py-3">
                       <p className="font-medium text-slate-800">{a.full_name}</p>
                       <p className="text-xs text-slate-500">{a.email}</p>
                     </td>
@@ -1691,7 +1602,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                         <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right">
+                    <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {a.status === 'pending' ? (
                           <div className="flex justify-end gap-2">
@@ -1748,6 +1659,10 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               </tbody>
             </table>
           </div>
+
+          <p className="mt-3 px-1 text-xs text-slate-500">
+            Showing {visible.length} of {total} {total === 1 ? 'guest' : 'guests'}
+          </p>
         </section>
       </div>
 
@@ -2448,6 +2363,6 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </AdminShell>
   );
 }

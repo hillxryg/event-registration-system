@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Globe, LayoutDashboard, LogIn, LogOut, Menu, Ticket, User, X } from 'lucide-react';
+import { Globe, LogIn, LogOut, Menu, Ticket, User, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UserProfile } from './types/database';
 import { supabase, fetchUserProfile } from './lib/supabase';
+import AdminShell from './components/AdminShell';
 import AuthPage from './pages/AuthPage';
+import PublicEventsPage from './pages/PublicEventsPage';
 import RegisterPage from './pages/RegisterPage';
+import MyPassesPage from './pages/MyPassesPage';
 import ScannerPage from './pages/ScannerPage';
-import AdminPage from './pages/AdminPage';
-import GuestDashboardPage from './pages/GuestDashboardPage';
+import AdminDashboardPage from './pages/AdminDashboardPage';
+import AdminCrudPage from './pages/AdminCrudPage';
 
 function navigateTo(path: string) {
   if (window.location.pathname === path) return;
@@ -18,11 +22,14 @@ function navigateTo(path: string) {
 
 const AUTH_REDIRECT_KEY = 'passflow_auth_redirect';
 
-const isRegisterPath = (p: string) => p === '/register' || p.startsWith('/register/');
+const isEventsPath = (p: string) => p === '/events' || p === '/events/';
+const isRegisterPath = (p: string) => p.startsWith('/register/');
+const isLegacyRegisterRoot = (p: string) => p === '/register' || p === '/register/';
+const isPublicPath = (p: string) => isEventsPath(p) || isRegisterPath(p);
 
 function rememberRedirect() {
   try {
-    if (isRegisterPath(window.location.pathname)) {
+    if (isPublicPath(window.location.pathname)) {
       window.sessionStorage.setItem(AUTH_REDIRECT_KEY, window.location.pathname);
     }
   } catch {
@@ -53,25 +60,23 @@ function TopNav({ user, path, onSignOut }: TopNavProps) {
     setOpen(false);
   }, [path]);
 
-  const homePath = user ? (user.role === 'admin' ? '/admin' : '/my-passes') : '/register';
+  const homePath = user ? (user.role === 'admin' ? '/admin' : '/my-passes') : '/events';
 
   const links: { label: string; to: string; Icon: LucideIcon; active: boolean }[] = [
-    { label: 'Public Events', to: '/register', Icon: Globe, active: isRegisterPath(path) },
+    {
+      label: 'Public Events',
+      to: '/events',
+      Icon: Globe,
+      active: isEventsPath(path) || isRegisterPath(path),
+    },
   ];
   if (user) {
-    if (user.role === 'admin') {
-      links.push(
-        { label: 'Admin Dashboard', to: '/admin', Icon: LayoutDashboard, active: path.startsWith('/admin') },
-        { label: 'My Passes', to: '/my-passes', Icon: Ticket, active: path.startsWith('/my-passes') },
-      );
-    } else {
-      links.push({
-        label: 'My Passes',
-        to: '/my-passes',
-        Icon: Ticket,
-        active: path.startsWith('/my-passes'),
-      });
-    }
+    links.push({
+      label: 'My Passes',
+      to: '/my-passes',
+      Icon: Ticket,
+      active: path.startsWith('/my-passes'),
+    });
   }
 
   const signIn = () => {
@@ -223,6 +228,30 @@ function TopNav({ user, path, onSignOut }: TopNavProps) {
   );
 }
 
+interface SharedLayoutProps {
+  user: UserProfile | null;
+  path: string;
+  onSignOut: () => void | Promise<void>;
+  children: ReactNode;
+}
+
+/** Admins get the AdminShell side rail; guests and visitors get the top nav. */
+function SharedLayout({ user, path, onSignOut, children }: SharedLayoutProps) {
+  if (user?.role === 'admin') {
+    return (
+      <AdminShell profile={user} onSignOut={onSignOut}>
+        {children}
+      </AdminShell>
+    );
+  }
+  return (
+    <div className="relative">
+      <TopNav user={user} path={path} onSignOut={onSignOut} />
+      {children}
+    </div>
+  );
+}
+
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -233,6 +262,13 @@ export default function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  // Backwards compatibility: legacy `/register` directory links resolve to `/events`
+  useEffect(() => {
+    if (!isLegacyRegisterRoot(path)) return;
+    window.history.replaceState({}, '', `/events${window.location.search}`);
+    setPath('/events');
+  }, [path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,7 +314,7 @@ export default function App() {
       return;
     }
     const intended = remembered ?? window.location.pathname;
-    navigateTo(isRegisterPath(intended) ? intended : '/my-passes');
+    navigateTo(isPublicPath(intended) ? intended : '/my-passes');
   };
 
   const handleSignOut = async () => {
@@ -287,7 +323,10 @@ export default function App() {
     navigateTo('/');
   };
 
-  if (path === '/scanner' || path.startsWith('/scanner/')) {
+  const routePath = isLegacyRegisterRoot(path) ? '/events' : path;
+  const embedded = currentUser?.role === 'admin';
+
+  if (routePath === '/scanner' || routePath.startsWith('/scanner/')) {
     return <ScannerPage />;
   }
 
@@ -301,42 +340,55 @@ export default function App() {
     );
   }
 
-  if (path === '/admin' || path.startsWith('/admin/')) {
+  // ---------- Admin-only ----------
+  if (routePath === '/admin' || routePath.startsWith('/admin/')) {
     if (!currentUser || currentUser.role !== 'admin') {
       return <AuthPage onAuthSuccess={handleAuthSuccess} />;
     }
-    return <AdminPage user={currentUser} onSignOut={handleSignOut} />;
+    if (routePath === '/admin/manage' || routePath.startsWith('/admin/manage/')) {
+      return <AdminCrudPage profile={currentUser} onSignOut={handleSignOut} />;
+    }
+    return <AdminDashboardPage profile={currentUser} onSignOut={handleSignOut} />;
   }
 
-  if (path === '/my-passes' || path.startsWith('/my-passes/')) {
+  // ---------- My Passes (guest + admin) ----------
+  if (routePath === '/my-passes' || routePath.startsWith('/my-passes/')) {
     if (!currentUser) {
       return <AuthPage onAuthSuccess={handleAuthSuccess} />;
     }
     return (
-      <div className="relative">
-        <TopNav user={currentUser} path={path} onSignOut={handleSignOut} />
-        <GuestDashboardPage user={currentUser} onSignOut={handleSignOut} />
-      </div>
+      <SharedLayout user={currentUser} path={routePath} onSignOut={handleSignOut}>
+        <MyPassesPage user={currentUser} onSignOut={handleSignOut} embedded={embedded} />
+      </SharedLayout>
     );
   }
 
-  if (isRegisterPath(path)) {
+  // ---------- Public: /events ----------
+  if (isEventsPath(routePath)) {
     return (
-      <div className="relative">
-        <TopNav user={currentUser} path={path} onSignOut={handleSignOut} />
-        <RegisterPage viewer={currentUser} />
-      </div>
+      <SharedLayout user={currentUser} path={routePath} onSignOut={handleSignOut}>
+        <PublicEventsPage viewer={currentUser} embedded={embedded} />
+      </SharedLayout>
     );
   }
 
+  // ---------- Public: /register/:slug ----------
+  if (isRegisterPath(routePath)) {
+    return (
+      <SharedLayout user={currentUser} path={routePath} onSignOut={handleSignOut}>
+        <RegisterPage viewer={currentUser} embedded={embedded} />
+      </SharedLayout>
+    );
+  }
+
+  // ---------- Fallback ----------
   if (currentUser) {
     return currentUser.role === 'admin' ? (
-      <AdminPage user={currentUser} onSignOut={handleSignOut} />
+      <AdminDashboardPage profile={currentUser} onSignOut={handleSignOut} />
     ) : (
-      <div className="relative">
-        <TopNav user={currentUser} path={path} onSignOut={handleSignOut} />
-        <GuestDashboardPage user={currentUser} onSignOut={handleSignOut} />
-      </div>
+      <SharedLayout user={currentUser} path={routePath} onSignOut={handleSignOut}>
+        <MyPassesPage user={currentUser} onSignOut={handleSignOut} />
+      </SharedLayout>
     );
   }
 
