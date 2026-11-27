@@ -24,6 +24,9 @@ import {
   AlertTriangle,
   UserPlus,
   Pencil,
+  Eye,
+  EyeOff,
+  QrCode,
 } from 'lucide-react';
 import type {
   UserProfile,
@@ -175,6 +178,11 @@ const parseLocal = (v: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
   if (!m) return null;
   return { y: +m[1], m: +m[2] - 1, d: +m[3], h: +m[4], min: +m[5] };
+};
+
+const toLocalInput = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
 type PickedDate = { y: number; m: number; d: number };
@@ -633,6 +641,19 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     pin: string;
     visibility: EventVisibility;
   }>({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
+  const [editOpen, setEditOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [resendAll, setResendAll] = useState(false);
+  const [editErrors, setEditErrors] = useState<FieldErrors>({});
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{
+    title: string;
+    venue: string;
+    date: string;
+    pin: string;
+    visibility: EventVisibility;
+  }>({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
 
   const openModal = () => {
     setFieldErrors({});
@@ -650,6 +671,75 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     if (deleting) return;
     setDeleteOpen(false);
   };
+
+  const openEditModal = () => {
+    if (!event) return;
+    setEditForm({
+      title: event.title,
+      venue: event.venue,
+      date: toLocalInput(event.event_date),
+      pin: event.scanner_pin ?? '',
+      visibility: event.visibility,
+    });
+    setEditErrors({});
+    setEditFormError(null);
+    setShowPin(false);
+    setResendAll(false);
+    setEditOpen(true);
+  };
+
+  const closeEditModal = () => {
+    if (saving) return;
+    setEditErrors({});
+    setEditFormError(null);
+    setEditOpen(false);
+  };
+
+  const clearEditError = (key: FieldKey) =>
+    setEditErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  // Auto-check the re-send box whenever title, venue, or date differs from the saved event
+  const applyEditChange = (patch: Partial<typeof editForm>) => {
+    const next = { ...editForm, ...patch };
+    setEditForm(next);
+    if (
+      event &&
+      (next.title.trim() !== event.title ||
+        next.venue.trim() !== event.venue ||
+        next.date !== toLocalInput(event.event_date))
+    ) {
+      setResendAll(true);
+    }
+  };
+
+  const validateEditForm = (): FieldErrors => {
+    const errors: FieldErrors = {};
+    if (!editForm.title.trim()) errors.title = 'Event title is required.';
+    if (!editForm.venue.trim()) errors.venue = 'Venue is required.';
+    if (!editForm.date || !parseLocal(editForm.date))
+      errors.date = 'Pick a date and time for the event.';
+    if (!editForm.pin) errors.pin = 'Scanner PIN is required.';
+    else if (!/^\d{4}$/.test(editForm.pin)) errors.pin = 'Scanner PIN must be exactly 4 digits.';
+    return errors;
+  };
+
+  useEffect(() => {
+    if (!editOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !saving) {
+        setEditErrors({});
+        setEditFormError(null);
+        setEditOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editOpen, saving]);
 
   const clearFieldError = (key: FieldKey) =>
     setFieldErrors((prev) => {
@@ -790,6 +880,77 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setQuery('');
     setFilter('all');
     setDeleteOpen(false);
+  };
+
+  const saveEvent = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!event || saving) return;
+    const errors = validateEditForm();
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setSaving(true);
+    setEditFormError(null);
+
+    // `slug` is intentionally omitted so /register/:slug and /scanner/:slug links stay valid
+    const { data, error } = await supabase
+      .from('events')
+      .update({
+        title: editForm.title.trim(),
+        venue: editForm.venue.trim(),
+        event_date: new Date(editForm.date).toISOString(),
+        visibility: editForm.visibility,
+        scanner_pin: editForm.pin,
+      })
+      .eq('id', event.id)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      setSaving(false);
+      setEditFormError(error?.message ?? 'Could not update event.');
+      return;
+    }
+
+    const updated = data as EventItem;
+    setEvents((prev) =>
+      prev
+        .map((e) => (e.id === updated.id ? { ...e, ...updated } : e))
+        .sort((a, b) => a.event_date.localeCompare(b.event_date)),
+    );
+
+    if (resendAll) {
+      const { data: approved, error: listErr } = await supabase
+        .from('attendees')
+        .select('id')
+        .eq('event_id', updated.id)
+        .eq('status', 'approved');
+
+      if (listErr) {
+        setError(`Event updated, but approved guests could not be loaded: ${listErr.message}`);
+      } else {
+        const targets = (approved ?? []) as { id: string }[];
+        let failed = 0;
+        for (const a of targets) {
+          const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
+            body: { attendee_id: a.id },
+          });
+          if (fnError) failed += 1;
+        }
+        if (failed > 0) {
+          setError(
+            `Event updated, but ${failed} of ${targets.length} pass ${
+              targets.length === 1 ? 'email' : 'emails'
+            } failed to send.`,
+          );
+        }
+      }
+    }
+
+    setSaving(false);
+    setEditErrors({});
+    setEditFormError(null);
+    setEditOpen(false);
   };
 
   const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
@@ -1120,6 +1281,16 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
               >
                 <ScanLine size={14} /> Scanner
               </a>
+              <a
+                href="/my-passes"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/my-passes');
+                }}
+                className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700"
+              >
+                <QrCode size={14} /> My Passes
+              </a>
               <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
                   <ShieldCheck size={16} />
@@ -1181,6 +1352,17 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                   >
                     <ScanLine size={14} /> Scanner Link
                   </a>
+                  <a
+                    href="/my-passes"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMenuOpen(false);
+                      navigate('/my-passes');
+                    }}
+                    className="liquid-glass flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-sm text-slate-700"
+                  >
+                    <QrCode size={14} /> My Passes
+                  </a>
                   <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/60 py-1 pl-1 pr-4 text-sm text-slate-700">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-white">
                       <ShieldCheck size={16} />
@@ -1221,6 +1403,15 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             >
               {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
               {copied ? 'Copied!' : 'Copy Link'}
+            </button>
+            <button
+              type="button"
+              onClick={openEditModal}
+              disabled={!event}
+              aria-label="Edit event"
+              className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              <Pencil size={14} /> Edit Event
             </button>
             <button
               type="button"
@@ -1881,6 +2072,190 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Event modal */}
+      <AnimatePresence>
+        {editOpen && event && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm sm:items-center"
+            onClick={closeEditModal}
+          >
+            <motion.form
+              onSubmit={saveEvent}
+              noValidate
+              onClick={(e) => e.stopPropagation()}
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.97 }}
+              className="liquid-glass my-auto w-full max-w-md space-y-4 overflow-visible! rounded-3xl p-5 sm:p-6"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-800">Edit Event</h2>
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={saving}
+                  aria-label="Close"
+                  className="rounded-full bg-white/60 p-2 text-slate-600 disabled:opacity-60"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div>
+                <input
+                  value={editForm.title}
+                  onChange={(e) => {
+                    applyEditChange({ title: e.target.value });
+                    if (e.target.value.trim()) clearEditError('title');
+                  }}
+                  disabled={saving}
+                  placeholder="Event title"
+                  aria-invalid={!!editErrors.title}
+                  aria-describedby={editErrors.title ? 'edit-event-title-error' : undefined}
+                  className={`liquid-pill-input w-full ${editErrors.title ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="edit-event-title-error" message={editErrors.title} />
+              </div>
+
+              <div>
+                <input
+                  value={editForm.venue}
+                  onChange={(e) => {
+                    applyEditChange({ venue: e.target.value });
+                    if (e.target.value.trim()) clearEditError('venue');
+                  }}
+                  disabled={saving}
+                  placeholder="Venue"
+                  aria-invalid={!!editErrors.venue}
+                  aria-describedby={editErrors.venue ? 'edit-event-venue-error' : undefined}
+                  className={`liquid-pill-input w-full ${editErrors.venue ? INVALID_INPUT : ''}`}
+                />
+                <FieldError id="edit-event-venue-error" message={editErrors.venue} />
+              </div>
+
+              <div>
+                <DateTimePicker
+                  value={editForm.date}
+                  onChange={(date) => {
+                    applyEditChange({ date });
+                    if (date) clearEditError('date');
+                  }}
+                  invalid={!!editErrors.date}
+                  describedBy={editErrors.date ? 'edit-event-date-error' : undefined}
+                />
+                <FieldError id="edit-event-date-error" message={editErrors.date} />
+              </div>
+
+              <div>
+                <div className="relative">
+                  <input
+                    value={editForm.pin}
+                    onChange={(e) => {
+                      const pin = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setEditForm((f) => ({ ...f, pin }));
+                      if (pin.length === 4) clearEditError('pin');
+                    }}
+                    type={showPin ? 'text' : 'password'}
+                    disabled={saving}
+                    placeholder="4-digit scanner PIN"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    aria-invalid={!!editErrors.pin}
+                    aria-describedby={
+                      editErrors.pin ? 'edit-event-pin-error' : 'edit-event-pin-hint'
+                    }
+                    className={`liquid-pill-input w-full pr-12 ${editErrors.pin ? INVALID_INPUT : ''}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin((v) => !v)}
+                    aria-label={showPin ? 'Hide scanner PIN' : 'Show scanner PIN'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/60 p-2 text-slate-600 transition hover:bg-white"
+                  >
+                    {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <FieldError id="edit-event-pin-error" message={editErrors.pin} />
+                {!editErrors.pin && (
+                  <p id="edit-event-pin-hint" className="mt-1.5 px-4 text-xs text-slate-500">
+                    View the current scanner PIN or overwrite it to reset a forgotten one.
+                  </p>
+                )}
+              </div>
+
+              <div
+                role="radiogroup"
+                aria-label="Event visibility"
+                className="liquid-glass grid grid-cols-2 gap-1 rounded-2xl p-1"
+              >
+                {(
+                  [
+                    { key: 'public', title: 'Public', hint: 'Anyone can join' },
+                    { key: 'exclusive', title: 'Exclusive', hint: 'Requires admin approval' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={editForm.visibility === opt.key}
+                    disabled={saving}
+                    onClick={() => setEditForm((f) => ({ ...f, visibility: opt.key }))}
+                    className="relative z-10 rounded-xl px-3 py-2 text-left"
+                  >
+                    {editForm.visibility === opt.key && (
+                      <motion.span
+                        layoutId="edit-visibility-toggle"
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                        className="absolute inset-0 -z-10 rounded-xl bg-white/80 shadow"
+                      />
+                    )}
+                    <span
+                      className={`block text-sm font-semibold ${
+                        editForm.visibility === opt.key ? 'text-violet-600' : 'text-slate-700'
+                      }`}
+                    >
+                      {opt.title}
+                    </span>
+                    <span className="block text-xs text-slate-500">— {opt.hint}</span>
+                  </button>
+                ))}
+              </div>
+
+              <label className="liquid-glass flex cursor-pointer items-center gap-3 rounded-2xl px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={resendAll}
+                  disabled={saving}
+                  onChange={(e) => setResendAll(e.target.checked)}
+                  className="size-4 accent-violet-500"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  Re-send QR pass emails to all approved guests
+                </span>
+              </label>
+
+              {editFormError && (
+                <p role="alert" className="text-xs font-semibold text-rose-600">
+                  {editFormError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="liquid-btn-primary w-full disabled:opacity-60"
+              >
+                {saving ? (resendAll ? 'Updating & sending passes…' : 'Saving…') : 'Save Changes'}
+              </button>
+            </motion.form>
           </motion.div>
         )}
       </AnimatePresence>

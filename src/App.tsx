@@ -59,11 +59,19 @@ function TopNav({ user, path, onSignOut }: TopNavProps) {
     { label: 'Public Events', to: '/register', Icon: Globe, active: isRegisterPath(path) },
   ];
   if (user) {
-    links.push(
-      user.role === 'admin'
-        ? { label: 'Admin Dashboard', to: '/admin', Icon: LayoutDashboard, active: false }
-        : { label: 'My Passes', to: '/my-passes', Icon: Ticket, active: path.startsWith('/my-passes') },
-    );
+    if (user.role === 'admin') {
+      links.push(
+        { label: 'Admin Dashboard', to: '/admin', Icon: LayoutDashboard, active: path.startsWith('/admin') },
+        { label: 'My Passes', to: '/my-passes', Icon: Ticket, active: path.startsWith('/my-passes') },
+      );
+    } else {
+      links.push({
+        label: 'My Passes',
+        to: '/my-passes',
+        Icon: Ticket,
+        active: path.startsWith('/my-passes'),
+      });
+    }
   }
 
   const signIn = () => {
