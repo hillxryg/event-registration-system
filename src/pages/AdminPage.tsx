@@ -645,6 +645,12 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const [saving, setSaving] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [resendAll, setResendAll] = useState(false);
+  const [resendSummary, setResendSummary] = useState<{
+    title: string;
+    total: number;
+    failed: number;
+    loadFailed: boolean;
+  } | null>(null);
   const [editErrors, setEditErrors] = useState<FieldErrors>({});
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -740,6 +746,15 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editOpen, saving]);
+
+  useEffect(() => {
+    if (!resendSummary) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setResendSummary(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [resendSummary]);
 
   const clearFieldError = (key: FieldKey) =>
     setFieldErrors((prev) => {
@@ -919,6 +934,9 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
         .sort((a, b) => a.event_date.localeCompare(b.event_date)),
     );
 
+    let summary: { title: string; total: number; failed: number; loadFailed: boolean } | null =
+      null;
+
     if (resendAll) {
       const { data: approved, error: listErr } = await supabase
         .from('attendees')
@@ -928,12 +946,13 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
 
       if (listErr) {
         setError(`Event updated, but approved guests could not be loaded: ${listErr.message}`);
+        summary = { title: updated.title, total: 0, failed: 0, loadFailed: true };
       } else {
         const targets = (approved ?? []) as { id: string }[];
         let failed = 0;
         for (const a of targets) {
           const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
-            body: { attendee_id: a.id },
+            body: { attendee_id: a.id, updated: true },
           });
           if (fnError) failed += 1;
         }
@@ -944,6 +963,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             } failed to send.`,
           );
         }
+        summary = { title: updated.title, total: targets.length, failed, loadFailed: false };
       }
     }
 
@@ -951,6 +971,7 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setEditErrors({});
     setEditFormError(null);
     setEditOpen(false);
+    if (summary) setResendSummary(summary);
   };
 
   const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
@@ -2323,6 +2344,104 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 >
                   <Trash2 size={14} />
                   {deleting ? 'Deleting…' : 'Delete Event'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Re-send Confirmation modal */}
+      <AnimatePresence>
+        {resendSummary && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
+            onClick={() => setResendSummary(null)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="resend-summary-title"
+              aria-describedby="resend-summary-desc"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.97 }}
+              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                    resendSummary.failed > 0 || resendSummary.loadFailed
+                      ? 'bg-rose-100/90 text-rose-600'
+                      : 'bg-emerald-100/90 text-emerald-600'
+                  }`}
+                >
+                  {resendSummary.failed > 0 || resendSummary.loadFailed ? (
+                    <AlertTriangle size={20} />
+                  ) : (
+                    <Check size={20} />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <h2 id="resend-summary-title" className="text-lg font-semibold text-slate-800">
+                    Event updated
+                  </h2>
+                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
+                    {resendSummary.title}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className={`rounded-2xl px-4 py-3 ${
+                  resendSummary.failed > 0 || resendSummary.loadFailed
+                    ? 'bg-rose-50/60 ring-2 ring-rose-400/35'
+                    : 'bg-white/50'
+                }`}
+              >
+                <p id="resend-summary-desc" className="text-sm text-slate-700">
+                  {resendSummary.loadFailed ? (
+                    <>
+                      The event was saved, but{' '}
+                      <span className="font-semibold text-rose-600">
+                        approved guests could not be loaded
+                      </span>
+                      , so no updated pass emails were sent.
+                    </>
+                  ) : resendSummary.total === 0 ? (
+                    'No approved guests to notify yet.'
+                  ) : resendSummary.failed > 0 ? (
+                    <>
+                      Updated QR pass emails were sent to{' '}
+                      <span className="font-semibold">
+                        {resendSummary.total - resendSummary.failed} of {resendSummary.total}
+                      </span>{' '}
+                      approved {resendSummary.total === 1 ? 'guest' : 'guests'}.{' '}
+                      <span className="font-semibold text-rose-600">
+                        {resendSummary.failed}{' '}
+                        {resendSummary.failed === 1 ? 'email' : 'emails'} failed to send.
+                      </span>
+                    </>
+                  ) : (
+                    `Updated QR pass emails were sent to ${resendSummary.total} approved ${
+                      resendSummary.total === 1 ? 'guest' : 'guests'
+                    }.`
+                  )}
+                </p>
+              </div>
+
+              <div className="flex sm:justify-end">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setResendSummary(null)}
+                  className="liquid-btn-primary w-full sm:w-auto sm:px-8"
+                >
+                  Done
                 </button>
               </div>
             </motion.div>
