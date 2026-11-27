@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ArrowLeft, Compass, Globe, LayoutDashboard, LogIn, Ticket } from 'lucide-react';
+import { Compass, Globe, LayoutDashboard, LogIn, Ticket } from 'lucide-react';
 import type { UserProfile } from '../types/database';
 
 interface NotFoundPageProps {
@@ -16,73 +16,54 @@ export default function NotFoundPage({ user = null }: NotFoundPageProps) {
   const isAdmin = user?.role === 'admin';
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-6.5rem)] max-w-2xl items-center justify-center px-2 py-8 lg:min-h-[calc(100dvh-2.5rem)]">
+    <div className="flex min-h-[calc(100vh-6rem)] items-center justify-center p-4">
       <motion.div
-        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 260, damping: 26 }}
-        className="liquid-glass relative w-full overflow-hidden rounded-3xl p-8 text-center sm:p-12"
+        className="liquid-glass flex w-full max-w-lg flex-col items-center gap-6 px-6 py-12 text-center sm:px-10"
       >
-        {/* Subtle decorative glow */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-24 left-1/2 size-56 -translate-x-1/2 rounded-full bg-gradient-to-br from-violet-400/25 to-fuchsia-300/25 blur-3xl"
-        />
+        <span className="flex size-16 items-center justify-center rounded-full bg-white/70 text-violet-600 shadow-sm">
+          <Compass size={30} />
+        </span>
 
-        <div className="relative mx-auto flex max-w-md flex-col items-center">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/75 px-3.5 py-1.5 text-xs font-extrabold tracking-widest text-violet-600 uppercase shadow-xs">
-            <Compass size={14} />
-            404 · Off the Map
-          </div>
-
-          <h1 className="text-3xl font-extrabold tracking-tight text-[#18181B] sm:text-4xl">
-            We couldn&apos;t find that page
-          </h1>
-
-          <p className="mt-3 text-sm leading-relaxed font-medium text-[#18181B]/60 sm:text-base">
-            The link may be broken, the event URL might have changed, or you don&apos;t have
-            permission to view this route.
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-bold uppercase tracking-widest text-violet-600">Error 404</span>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#18181B]">Page not found</h1>
+          <p className="text-sm font-medium text-[#18181B]/60">
+            The page you’re looking for doesn’t exist, has moved, or you don’t have access to it.
           </p>
+        </div>
 
-          <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 sm:w-auto sm:flex-row">
-            <button
-              type="button"
-              onClick={() => navigateTo('/events')}
-              className="liquid-btn-primary inline-flex w-full items-center justify-center gap-2 whitespace-nowrap px-7 sm:w-auto"
-            >
-              <Globe size={17} />
-              Browse Events
-            </button>
-
-            {user ? (
-              <button
-                type="button"
-                onClick={() => navigateTo(isAdmin ? '/admin' : '/my-passes')}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-white/80 bg-white/75 px-7 text-sm font-bold whitespace-nowrap text-[#18181B] shadow-xs transition hover:bg-white sm:w-auto"
-              >
-                {isAdmin ? <LayoutDashboard size={17} /> : <Ticket size={17} />}
-                {isAdmin ? 'Admin Dashboard' : 'My Passes'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => navigateTo('/')}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full border border-white/80 bg-white/75 px-7 text-sm font-bold whitespace-nowrap text-[#18181B] shadow-xs transition hover:bg-white sm:w-auto"
-              >
-                <LogIn size={17} />
-                Sign In
-              </button>
-            )}
-          </div>
-
+        <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
           <button
             type="button"
-            onClick={() => window.history.back()}
-            className="mt-5 inline-flex items-center gap-1.5 text-xs font-bold text-[#18181B]/50 transition hover:text-[#18181B]"
+            onClick={() => navigateTo('/events')}
+            className="liquid-btn-primary w-full sm:w-auto"
           >
-            <ArrowLeft size={13} />
-            Go back to previous page
+            <Globe size={18} />
+            Browse Public Events
           </button>
+
+          {user ? (
+            <button
+              type="button"
+              onClick={() => navigateTo(isAdmin ? '/admin' : '/my-passes')}
+              className="inline-flex h-14 w-full items-center justify-center gap-2.5 rounded-full border border-white/80 bg-white/70 px-8 text-[0.9375rem] font-bold text-[#18181B] shadow-sm transition hover:bg-white sm:w-auto"
+            >
+              {isAdmin ? <LayoutDashboard size={18} /> : <Ticket size={18} />}
+              {isAdmin ? 'Go to Dashboard' : 'My Passes'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigateTo('/')}
+              className="inline-flex h-14 w-full items-center justify-center gap-2.5 rounded-full border border-white/80 bg-white/70 px-8 text-[0.9375rem] font-bold text-[#18181B] shadow-sm transition hover:bg-white sm:w-auto"
+            >
+              <LogIn size={18} />
+              Sign In
+            </button>
+          )}
         </div>
       </motion.div>
     </div>

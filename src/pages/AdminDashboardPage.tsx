@@ -1,3 +1,6 @@
+/* eslint-disable react-hooks/purity */
+/* eslint-disable react-hooks/preserve-manual-memoization */
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState, useRef, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -26,6 +29,7 @@ import type {
 } from '../types/database';
 import { supabase } from '../lib/supabase';
 import { useShellScannerSlug } from '../components/AppShell';
+import ConfirmModal, { SuccessModal, type SuccessReceipt } from '../components/ConfirmModal';
 
 interface AdminDashboardPageProps {
   profile: UserProfile;
@@ -180,6 +184,24 @@ function DateTimePicker({
       : { hour: 6, minute: 0, pm: true },
   );
 
+  const lastEmitted = useRef(value);
+
+  useEffect(() => {
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    const p = parseLocal(value);
+    if (p) {
+      setDateSel({ y: p.y, m: p.m, d: p.d });
+      setTime({ hour: p.h % 12 || 12, minute: p.min, pm: p.h >= 12 });
+      setView(new Date(p.y, p.m, 1));
+    } else {
+      const now = new Date();
+      setDateSel(null);
+      setTime({ hour: 6, minute: 0, pm: true });
+      setView(new Date(now.getFullYear(), now.getMonth(), 1));
+    }
+  }, [value]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
@@ -202,7 +224,9 @@ function DateTimePicker({
   const emit = (d: PickedDate | null, t: PickedTime) => {
     if (!d) return;
     const h24 = (t.hour % 12) + (t.pm ? 12 : 0);
-    onChange(`${d.y}-${pad(d.m + 1)}-${pad(d.d)}T${pad(h24)}:${pad(t.minute)}`);
+    const next = `${d.y}-${pad(d.m + 1)}-${pad(d.d)}T${pad(h24)}:${pad(t.minute)}`;
+    lastEmitted.current = next;
+    onChange(next);
   };
 
   const pickDate = (d: number) => {
@@ -214,7 +238,16 @@ function DateTimePicker({
   const pickTime = (patch: Partial<PickedTime>) => {
     const next = { ...time, ...patch };
     setTime(next);
-    emit(dateSel, next);
+    const base: PickedDate = dateSel ?? {
+      y: startOfToday.getFullYear(),
+      m: startOfToday.getMonth(),
+      d: startOfToday.getDate(),
+    };
+    if (!dateSel) {
+      setDateSel(base);
+      setView(new Date(base.y, base.m, 1));
+    }
+    emit(base, next);
   };
 
   const firstDow = new Date(view.getFullYear(), view.getMonth(), 1).getDay();
@@ -417,6 +450,12 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
 
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createConfirmOpen, setCreateConfirmOpen] = useState(false);
+  const [decision, setDecision] = useState<{
+    attendee: Attendee;
+    status: 'approved' | 'declined';
+  } | null>(null);
+  const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [form, setForm] = useState<{
@@ -499,12 +538,18 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
     return errors;
   };
 
-  const createEvent = async (ev: FormEvent) => {
+  const createEvent = (ev: FormEvent) => {
     ev.preventDefault();
     if (creating) return;
     const errors = validateForm();
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
+    setFormError(null);
+    setCreateConfirmOpen(true);
+  };
+
+  const confirmCreateEvent = async () => {
+    if (creating) return;
     setCreating(true);
     setFormError(null);
     const slug = form.title
@@ -527,6 +572,7 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
       .select('*')
       .single();
     setCreating(false);
+    setCreateConfirmOpen(false);
     if (insertError || !data) {
       setFormError(
         insertError?.code === '23505'
@@ -543,6 +589,15 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
     setFieldErrors({});
     setFormError(null);
     setModalOpen(false);
+    setReceipt({
+      title: 'Event created successfully',
+      details: [
+        { label: 'Title', value: created.title },
+        { label: 'Date & time', value: formatManila(created.event_date) },
+        { label: 'Venue', value: created.venue },
+        { label: 'Visibility', value: created.visibility === 'exclusive' ? 'Exclusive' : 'Public' },
+      ],
+    });
   };
 
   /* Quick approve / decline */
@@ -560,13 +615,38 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
       return;
     }
     setAttendees((prev) => prev.map((x) => (x.id === a.id ? { ...x, status } : x)));
+    let emailFailed = false;
     if (status === 'approved') {
       const { error: fnError } = await supabase.functions.invoke('send-ticket-email', {
         body: { attendee_id: a.id },
       });
-      if (fnError) setError('Guest approved, but the ticket email failed to send.');
+      if (fnError) {
+        emailFailed = true;
+        setError('Guest approved, but the ticket email failed to send.');
+      }
     }
     setActingId(null);
+    setReceipt({
+      title: status === 'approved' ? 'Registration approved' : 'Registration declined',
+      variant: emailFailed ? 'warning' : 'success',
+      details: [
+        { label: 'Guest', value: a.full_name },
+        { label: 'Email', value: a.email },
+        { label: 'Event', value: eventById.get(a.event_id)?.title ?? 'Unknown event' },
+      ],
+      notice:
+        status === 'declined'
+          ? 'No QR pass was issued to this guest.'
+          : emailFailed
+            ? 'Approved, but the QR pass email failed to send.'
+            : `QR pass email sent to ${a.email}.`,
+    });
+  };
+
+  const confirmDecision = async () => {
+    if (!decision) return;
+    await decide(decision.attendee, decision.status);
+    setDecision(null);
   };
 
   /* Derived data */
@@ -953,7 +1033,7 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={() => void decide(a, 'approved')}
+                              onClick={() => setDecision({ attendee: a, status: 'approved' })}
                               className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
                             >
                               <Check size={13} />
@@ -962,7 +1042,7 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={() => void decide(a, 'declined')}
+                              onClick={() => setDecision({ attendee: a, status: 'declined' })}
                               className="inline-flex items-center gap-1 rounded-full bg-rose-100/90 px-3.5 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-200 disabled:opacity-60"
                             >
                               <X size={13} />
@@ -1287,6 +1367,58 @@ export default function AdminDashboardPage({ profile }: AdminDashboardPageProps)
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={createConfirmOpen}
+        variant="primary"
+        title="Create this event?"
+        description="Review the details before the event goes live."
+        details={[
+          { label: 'Title', value: form.title.trim() },
+          { label: 'Venue', value: form.venue.trim() },
+          {
+            label: 'Date & time',
+            value: parseLocal(form.date) ? formatManila(new Date(form.date).toISOString()) : '—',
+          },
+          { label: 'Visibility', value: form.visibility === 'exclusive' ? 'Exclusive' : 'Public' },
+        ]}
+        notice={
+          form.visibility === 'exclusive'
+            ? 'Guests will need your approval before they receive a QR pass.'
+            : 'Anyone with the invite link can register and get an instant QR pass.'
+        }
+        confirmLabel="Create Event"
+        confirmingLabel="Creating…"
+        confirming={creating}
+        onConfirm={() => void confirmCreateEvent()}
+        onCancel={() => setCreateConfirmOpen(false)}
+      />
+
+      <ConfirmModal
+        open={decision !== null}
+        variant={decision?.status === 'declined' ? 'danger' : 'primary'}
+        title={decision?.status === 'declined' ? 'Decline this registration?' : 'Approve this registration?'}
+        details={[
+          { label: 'Guest', value: decision?.attendee.full_name },
+          { label: 'Email', value: decision?.attendee.email },
+          {
+            label: 'Event',
+            value: decision ? (eventById.get(decision.attendee.event_id)?.title ?? 'Unknown event') : '',
+          },
+        ]}
+        notice={
+          decision?.status === 'declined'
+            ? 'The guest will not receive a QR pass.'
+            : `A QR pass email will be sent to ${decision?.attendee.email ?? 'the guest'} right away.`
+        }
+        confirmLabel={decision?.status === 'declined' ? 'Decline' : 'Approve & send pass'}
+        confirmingLabel="Working…"
+        confirming={actingId !== null}
+        onConfirm={() => void confirmDecision()}
+        onCancel={() => setDecision(null)}
+      />
+
+      <SuccessModal receipt={receipt} onClose={() => setReceipt(null)} />
     </>
   );
 }

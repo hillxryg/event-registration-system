@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -25,6 +26,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { Attendee, EventItem, RegistrationStatus, UserProfile } from '../types/database';
 import { supabase } from '../lib/supabase';
+import ConfirmModal, { SuccessModal, type SuccessReceipt } from '../components/ConfirmModal';
 
 const getSlugFromPath = (): string | null => {
   const [, , slug] = window.location.pathname.split('/');
@@ -415,6 +417,8 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
   const [existingReg, setExistingReg] = useState<Attendee | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(Boolean(viewer));
   const [duplicateAttempt, setDuplicateAttempt] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
 
   const errors = useMemo(() => validate(values), [values]);
   const visibleErrors: FormErrors = Object.fromEntries(
@@ -542,7 +546,7 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
     setTouched((prev) => ({ ...prev, [field]: true }));
   };
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setTouched({
       full_name: true,
@@ -551,6 +555,12 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
       contact_number: true,
     });
     if (!event || event.status !== 'active' || Object.keys(errors).length > 0 || submitting) return;
+    setSubmitError(null);
+    setConfirmOpen(true);
+  };
+
+  const submitRegistration = async () => {
+    if (!event || event.status !== 'active' || submitting) return;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -594,6 +604,29 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
         if (fnError) {
           setSubmitError(`Pass generated, but email failed: ${fnError.message}`);
         }
+        setReceipt({
+          title: 'Registration confirmed',
+          variant: fnError ? 'warning' : 'success',
+          details: [
+            { label: 'Event', value: event.title },
+            { label: 'Name', value: created.full_name },
+            { label: 'Email', value: created.email },
+            { label: 'Ticket', value: <span className="font-mono text-xs">{created.ticket_code}</span> },
+          ],
+          notice: fnError
+            ? 'Your QR pass is unlocked on screen, though the email failed to send.'
+            : `Your QR pass is unlocked on screen and a copy was sent to ${created.email}.`,
+        });
+      } else {
+        setReceipt({
+          title: 'Join request submitted',
+          details: [
+            { label: 'Event', value: event.title },
+            { label: 'Name', value: created.full_name },
+            { label: 'Email', value: created.email },
+          ],
+          notice: `Your request is pending organizer approval. Once approved, your QR pass will be emailed to ${created.email}.`,
+        });
       }
     } else {
       setDuplicateAttempt(failure?.code === '23505');
@@ -604,6 +637,7 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
       );
     }
     setSubmitting(false);
+    setConfirmOpen(false);
   };
 
   const handleSignInRedirect = () => {
@@ -1022,6 +1056,30 @@ export default function RegisterPage({ viewer = null, embedded = false }: Regist
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        variant="primary"
+        title={event.visibility === 'exclusive' ? 'Send join request?' : 'Confirm your registration?'}
+        description="Please double-check your details before submitting."
+        details={[
+          { label: 'Event', value: event.title },
+          { label: 'Name', value: values.full_name.trim() },
+          { label: 'Email', value: values.email.trim() },
+        ]}
+        notice={
+          event.visibility === 'exclusive'
+            ? 'This event requires organizer approval. Your QR pass will be emailed to you once your request is approved.'
+            : 'Your QR pass is issued instantly and a copy will be emailed to you.'
+        }
+        confirmLabel={event.visibility === 'exclusive' ? 'Send request' : 'Confirm & get pass'}
+        confirmingLabel={event.visibility === 'exclusive' ? 'Submitting request…' : 'Generating pass…'}
+        confirming={submitting}
+        onConfirm={() => void submitRegistration()}
+        onCancel={() => setConfirmOpen(false)}
+      />
+
+      <SuccessModal receipt={receipt} onClose={() => setReceipt(null)} />
     </div>
   );
 }

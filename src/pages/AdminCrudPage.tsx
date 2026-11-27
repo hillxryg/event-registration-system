@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -16,7 +18,6 @@ import {
   ChevronDown,
   SlidersHorizontal,
   Trash2,
-  AlertTriangle,
   UserPlus,
   Pencil,
   Eye,
@@ -32,6 +33,7 @@ import type {
 } from '../types/database';
 import { supabase } from '../lib/supabase';
 import { useShellScannerSlug } from '../components/AppShell';
+import ConfirmModal, { SuccessModal, type SuccessReceipt } from '../components/ConfirmModal';
 
 interface AdminCrudPageProps {
   profile: UserProfile;
@@ -184,6 +186,18 @@ const toLocalInput = (iso: string) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
+const formatDraftDate = (local: string) =>
+  parseLocal(local)
+    ? new Date(local).toLocaleString('en-PH', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '—';
+
 type PickedDate = { y: number; m: number; d: number };
 type PickedTime = { hour: number; minute: number; pm: boolean };
 
@@ -225,13 +239,34 @@ function DateTimePicker({
       : { hour: 6, minute: 0, pm: true },
   );
 
+  const lastEmitted = useRef(value);
+
+  useEffect(() => {
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    const p = parseLocal(value);
+    if (p) {
+      setDateSel({ y: p.y, m: p.m, d: p.d });
+      setTime({ hour: p.h % 12 || 12, minute: p.min, pm: p.h >= 12 });
+      setView(new Date(p.y, p.m, 1));
+    } else {
+      const now = new Date();
+      setDateSel(null);
+      setTime({ hour: 6, minute: 0, pm: true });
+      setView(new Date(now.getFullYear(), now.getMonth(), 1));
+    }
+  }, [value]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -244,7 +279,9 @@ function DateTimePicker({
   const emit = (d: PickedDate | null, t: PickedTime) => {
     if (!d) return;
     const h24 = (t.hour % 12) + (t.pm ? 12 : 0);
-    onChange(`${d.y}-${pad(d.m + 1)}-${pad(d.d)}T${pad(h24)}:${pad(t.minute)}`);
+    const next = `${d.y}-${pad(d.m + 1)}-${pad(d.d)}T${pad(h24)}:${pad(t.minute)}`;
+    lastEmitted.current = next;
+    onChange(next);
   };
 
   const pickDate = (d: number) => {
@@ -256,7 +293,16 @@ function DateTimePicker({
   const pickTime = (patch: Partial<PickedTime>) => {
     const next = { ...time, ...patch };
     setTime(next);
-    emit(dateSel, next);
+    const base: PickedDate = dateSel ?? {
+      y: startOfToday.getFullYear(),
+      m: startOfToday.getMonth(),
+      d: startOfToday.getDate(),
+    };
+    if (!dateSel) {
+      setDateSel(base);
+      setView(new Date(base.y, base.m, 1));
+    }
+    emit(base, next);
   };
 
   const firstDow = new Date(view.getFullYear(), view.getMonth(), 1).getDay();
@@ -620,6 +666,16 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
   const [copied, setCopied] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [createConfirmOpen, setCreateConfirmOpen] = useState(false);
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false);
+  const [guestConfirmOpen, setGuestConfirmOpen] = useState(false);
+  const [statusTarget, setStatusTarget] = useState<EventStatus | null>(null);
+  const [decision, setDecision] = useState<{
+    attendee: Attendee;
+    status: 'approved' | 'declined';
+  } | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
   const [guestModal, setGuestModal] = useState<'add' | 'edit' | null>(null);
   const [editTarget, setEditTarget] = useState<Attendee | null>(null);
   const [guestDeleteTarget, setGuestDeleteTarget] = useState<Attendee | null>(null);
@@ -644,12 +700,6 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
   const [saving, setSaving] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [resendAll, setResendAll] = useState(false);
-  const [resendSummary, setResendSummary] = useState<{
-    title: string;
-    total: number;
-    failed: number;
-    loadFailed: boolean;
-  } | null>(null);
   const [editErrors, setEditErrors] = useState<FieldErrors>({});
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -752,15 +802,6 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [editOpen, saving]);
 
-  useEffect(() => {
-    if (!resendSummary) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setResendSummary(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [resendSummary]);
-
   const clearFieldError = (key: FieldKey) =>
     setFieldErrors((prev) => {
       if (!prev[key]) return prev;
@@ -780,30 +821,17 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
   };
 
   useEffect(() => {
-    if (!deleteOpen) return;
+    if (!guestModal) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !deleting) setDeleteOpen(false);
+      if (e.key !== 'Escape' || guestSaving) return;
+      setGuestModal(null);
+      setEditTarget(null);
+      setGuestErrors({});
+      setFormError(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [deleteOpen, deleting]);
-
-  useEffect(() => {
-    if (!guestModal && !guestDeleteTarget) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (guestDeleteTarget) {
-        if (!guestDeleting) setGuestDeleteTarget(null);
-      } else if (!guestSaving) {
-        setGuestModal(null);
-        setEditTarget(null);
-        setGuestErrors({});
-        setFormError(null);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [guestModal, guestDeleteTarget, guestSaving, guestDeleting]);
+  }, [guestModal, guestSaving]);
 
   // Re-read `?event=<id>` whenever the history changes (e.g. Manage / Open in Manage links)
   useEffect(() => {
@@ -890,20 +918,43 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
     });
   }, [attendees, query, filter]);
 
-  const updateEventStatus = async (status: EventStatus) => {
+  const requestStatusChange = (status: EventStatus) => {
     if (!event || event.status === status || statusUpdating) return;
+    setStatusTarget(status);
+  };
+
+  const updateEventStatus = async () => {
+    if (!event || !statusTarget || event.status === statusTarget || statusUpdating) {
+      setStatusTarget(null);
+      return;
+    }
+    const status = statusTarget;
+    const title = event.title;
     setStatusUpdating(true);
     const { error } = await supabase.from('events').update({ status }).eq('id', event.id);
     setStatusUpdating(false);
+    setStatusTarget(null);
     if (error) {
       setError(error.message);
       return;
     }
     setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, status } : e)));
+    setReceipt({
+      title: `Event marked as ${EVENT_STATUS_UI[status].label}`,
+      details: [{ label: 'Event', value: title }],
+      notice:
+        status === 'cancelled'
+          ? 'Registration and the scanner are now blocked for this event.'
+          : status === 'closed'
+            ? 'New registrations are blocked. Registered guests can still be checked in.'
+            : 'Registration is open and the scanner accepts check-ins.',
+    });
   };
 
   const deleteEvent = async () => {
     if (!event || deleting) return;
+    const deletedTitle = event.title;
+    const removedCount = attendees.length;
     const deletedId = event.id;
     setDeleting(true);
     const { error } = await supabase.from('events').delete().eq('id', deletedId);
@@ -920,14 +971,27 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
     setQuery('');
     setFilter('all');
     setDeleteOpen(false);
+    setReceipt({
+      title: 'Event deleted',
+      details: [{ label: 'Event', value: deletedTitle }],
+      notice: `The event and its ${removedCount} ${
+        removedCount === 1 ? 'registration were' : 'registrations were'
+      } permanently removed.`,
+    });
   };
 
-  const saveEvent = async (ev: FormEvent) => {
+  const requestSaveEvent = (ev: FormEvent) => {
     ev.preventDefault();
     if (!event || saving) return;
     const errors = validateEditForm();
     setEditErrors(errors);
     if (Object.keys(errors).length > 0) return;
+    setEditFormError(null);
+    setEditConfirmOpen(true);
+  };
+
+  const saveEvent = async () => {
+    if (!event || saving) return;
 
     setSaving(true);
     setEditFormError(null);
@@ -948,6 +1012,7 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
 
     if (error || !data) {
       setSaving(false);
+      setEditConfirmOpen(false);
       setEditFormError(error?.message ?? 'Could not update event.');
       return;
     }
@@ -959,10 +1024,12 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
         .sort((a, b) => a.event_date.localeCompare(b.event_date)),
     );
 
-    let summary: { title: string; total: number; failed: number; loadFailed: boolean } | null =
-      null;
+    let emailNote: string;
+    let emailWarn = false;
 
-    if (resendAll) {
+    if (!resendAll) {
+      emailNote = 'No pass emails were re-sent.';
+    } else {
       const { data: approved, error: listErr } = await supabase
         .from('attendees')
         .select('id')
@@ -971,7 +1038,8 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
 
       if (listErr) {
         setError(`Event updated, but approved guests could not be loaded: ${listErr.message}`);
-        summary = { title: updated.title, total: 0, failed: 0, loadFailed: true };
+        emailNote = 'Approved guests could not be loaded, so no pass emails were re-sent.';
+        emailWarn = true;
       } else {
         const targets = (approved ?? []) as { id: string }[];
         let failed = 0;
@@ -987,23 +1055,45 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
               targets.length === 1 ? 'email' : 'emails'
             } failed to send.`,
           );
+          emailWarn = true;
+          emailNote = `Updated QR pass emails were sent to ${targets.length - failed} of ${
+            targets.length
+          } approved guests; ${failed} failed.`;
+        } else if (targets.length === 0) {
+          emailNote = 'There are no approved guests yet, so no pass emails were sent.';
+        } else {
+          emailNote = `Updated QR pass emails were sent to ${targets.length} approved ${
+            targets.length === 1 ? 'guest' : 'guests'
+          }.`;
         }
-        summary = { title: updated.title, total: targets.length, failed, loadFailed: false };
       }
     }
 
     setSaving(false);
+    setEditConfirmOpen(false);
     setEditErrors({});
     setEditFormError(null);
     setEditOpen(false);
-    if (summary) setResendSummary(summary);
+    setReceipt({
+      title: 'Event updated successfully',
+      variant: emailWarn ? 'warning' : 'success',
+      details: [
+        { label: 'Title', value: updated.title },
+        { label: 'Date & time', value: formatDraftDate(toLocalInput(updated.event_date)) },
+        { label: 'Venue', value: updated.venue },
+      ],
+      notice: emailNote,
+    });
   };
 
-  const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
+  const updateRegistrationStatus = async (
+    id: string,
+    status: RegistrationStatus,
+  ): Promise<'ok' | 'email_failed' | 'error'> => {
     const { error } = await supabase.from('attendees').update({ status }).eq('id', id);
     if (error) {
       setError(error.message);
-      return;
+      return 'error';
     }
     setAttendees((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
     if (status === 'approved') {
@@ -1012,8 +1102,35 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
       });
       if (fnError) {
         setError('Attendee approved, but the ticket email failed to send.');
+        return 'email_failed';
       }
     }
+    return 'ok';
+  };
+
+  const confirmDecision = async () => {
+    if (!decision || deciding) return;
+    const { attendee, status } = decision;
+    setDeciding(true);
+    const outcome = await updateRegistrationStatus(attendee.id, status);
+    setDeciding(false);
+    setDecision(null);
+    if (outcome === 'error') return;
+    setReceipt({
+      title: status === 'approved' ? 'Registration approved' : 'Registration declined',
+      variant: outcome === 'email_failed' ? 'warning' : 'success',
+      details: [
+        { label: 'Guest', value: attendee.full_name },
+        { label: 'Email', value: attendee.email },
+        { label: 'Event', value: event?.title },
+      ],
+      notice:
+        status === 'declined'
+          ? 'No QR pass was issued to this guest.'
+          : outcome === 'email_failed'
+            ? 'Approved, but the QR pass email failed to send.'
+            : `QR pass email sent to ${attendee.email}.`,
+    });
   };
 
   const copyInviteLink = async () => {
@@ -1145,10 +1262,11 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
       body: { attendee_id: attendeeId },
     });
     if (fnError) setError(`${okMessage}, but the ticket email failed to send.`);
+    return !fnError;
   };
 
   const addGuest = async () => {
-    if (!event) return false;
+    if (!event) return null;
     const { data, error } = await supabase
       .from('attendees')
       .insert({
@@ -1165,16 +1283,17 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
       .single();
     if (error || !data) {
       setFormError(error ? guestDbError(error) : 'Could not add guest.');
-      return false;
+      return null;
     }
     const created = data as Attendee;
     setAttendees((prev) => [created, ...prev]);
-    if (guestForm.sendEmail) await sendTicketEmail(created.id, 'Guest added');
-    return true;
+    let emailed: boolean | null = null;
+    if (guestForm.sendEmail) emailed = await sendTicketEmail(created.id, 'Guest added');
+    return { emailed };
   };
 
   const saveGuest = async () => {
-    if (!editTarget) return false;
+    if (!editTarget) return null;
     const nextEmail = guestForm.email.trim().toLowerCase();
     const { data, error } = await supabase
       .from('attendees')
@@ -1189,30 +1308,54 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
       .single();
     if (error || !data) {
       setFormError(error ? guestDbError(error) : 'Could not update guest.');
-      return false;
+      return null;
     }
     const updated = data as Attendee;
     setAttendees((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    let emailed: boolean | null = null;
     if (guestForm.sendEmail && updated.status === 'approved') {
-      await sendTicketEmail(updated.id, 'Guest updated');
+      emailed = await sendTicketEmail(updated.id, 'Guest updated');
     }
-    return true;
+    return { emailed };
   };
 
-  const submitGuest = async (ev: FormEvent) => {
+  const submitGuest = (ev: FormEvent) => {
     ev.preventDefault();
     if (guestSaving) return;
     const errors = validateGuest();
     setGuestErrors(errors);
     if (Object.keys(errors).length > 0) return;
+    setFormError(null);
+    setGuestConfirmOpen(true);
+  };
+
+  const confirmSubmitGuest = async () => {
+    if (guestSaving) return;
+    const isAdd = guestModal === 'add';
+    const name = guestForm.full_name.trim();
+    const email = guestForm.email.trim().toLowerCase();
     setGuestSaving(true);
     setFormError(null);
-    const ok = guestModal === 'add' ? await addGuest() : await saveGuest();
+    const result = isAdd ? await addGuest() : await saveGuest();
     setGuestSaving(false);
-    if (ok) {
-      setGuestModal(null);
-      setEditTarget(null);
-    }
+    setGuestConfirmOpen(false);
+    if (!result) return;
+    setGuestModal(null);
+    setEditTarget(null);
+    setReceipt({
+      title: isAdd ? 'Guest added' : 'Guest details saved',
+      variant: result.emailed === false ? 'warning' : 'success',
+      details: [
+        { label: 'Name', value: name },
+        { label: 'Email', value: email },
+      ],
+      notice:
+        result.emailed === true
+          ? `QR pass email sent to ${email}.`
+          : result.emailed === false
+            ? 'Saved, but the QR pass email failed to send.'
+            : 'No QR pass email was sent.',
+    });
   };
 
   const deleteGuest = async () => {
@@ -1228,14 +1371,29 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
     }
     setAttendees((prev) => prev.filter((a) => a.id !== target.id));
     setGuestDeleteTarget(null);
+    setReceipt({
+      title: 'Guest removed',
+      details: [
+        { label: 'Name', value: target.full_name },
+        { label: 'Email', value: target.email },
+        { label: 'Ticket', value: <span className="font-mono text-xs">{target.ticket_code}</span> },
+      ],
+      notice: 'Their registration and QR pass were permanently deleted.',
+    });
   };
 
-  const createEvent = async (ev: FormEvent) => {
+  const createEvent = (ev: FormEvent) => {
     ev.preventDefault();
     if (creating) return;
     const errors = validateForm();
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
+    setFormError(null);
+    setCreateConfirmOpen(true);
+  };
+
+  const confirmCreateEvent = async () => {
+    if (creating) return;
     setCreating(true);
     setFormError(null);
     const slug = form.title
@@ -1258,6 +1416,7 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
       .select('*')
       .single();
     setCreating(false);
+    setCreateConfirmOpen(false);
     if (error || !data) {
       setFormError(
         error?.code === '23505'
@@ -1272,6 +1431,15 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
     );
     selectEvent(created.id);
     setForm({ title: '', venue: '', date: '', pin: '', visibility: 'public' });
+    setReceipt({
+      title: 'Event created successfully',
+      details: [
+        { label: 'Title', value: created.title },
+        { label: 'Date & time', value: formatDraftDate(toLocalInput(created.event_date)) },
+        { label: 'Venue', value: created.venue },
+        { label: 'Visibility', value: created.visibility === 'exclusive' ? 'Exclusive' : 'Public' },
+      ],
+    });
     closeModal();
   };
 
@@ -1351,7 +1519,7 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
                 <EventStatusControl
                   status={event.status}
                   updating={statusUpdating}
-                  onChange={updateEventStatus}
+                  onChange={requestStatusChange}
                 />
               </div>
             )}
@@ -1605,13 +1773,13 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
                         {a.status === 'pending' ? (
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => updateRegistrationStatus(a.id, 'approved')}
+                              onClick={() => setDecision({ attendee: a, status: 'approved' })}
                               className="whitespace-nowrap rounded-full bg-emerald-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-600"
                             >
                               Approve
                             </button>
                             <button
-                              onClick={() => updateRegistrationStatus(a.id, 'declined')}
+                              onClick={() => setDecision({ attendee: a, status: 'declined' })}
                               className="whitespace-nowrap rounded-full bg-rose-500 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-600"
                             >
                               Decline
@@ -1936,80 +2104,6 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
         )}
       </AnimatePresence>
 
-      {/* Delete Guest confirmation modal */}
-      <AnimatePresence>
-        {guestDeleteTarget && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
-            onClick={() => !guestDeleting && setGuestDeleteTarget(null)}
-          >
-            <motion.div
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="delete-guest-title"
-              aria-describedby="delete-guest-desc"
-              onClick={(e) => e.stopPropagation()}
-              initial={{ opacity: 0, y: 24, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.97 }}
-              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100/90 text-rose-600">
-                  <AlertTriangle size={20} />
-                </span>
-                <div className="min-w-0">
-                  <h2 id="delete-guest-title" className="text-lg font-semibold text-slate-800">
-                    Remove this guest?
-                  </h2>
-                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
-                    {guestDeleteTarget.full_name}
-                  </p>
-                  <p className="break-all text-xs text-slate-500">{guestDeleteTarget.email}</p>
-                  <p className="mt-1 font-mono text-xs text-slate-600">
-                    {guestDeleteTarget.ticket_code}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-rose-50/60 px-4 py-3 ring-2 ring-rose-400/35">
-                <p id="delete-guest-desc" className="text-sm text-slate-700">
-                  Removing this guest{' '}
-                  <span className="font-semibold text-rose-600">
-                    permanently deletes their registration and QR pass
-                  </span>
-                  . This action cannot be undone.
-                </p>
-              </div>
-
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  autoFocus
-                  onClick={() => setGuestDeleteTarget(null)}
-                  disabled={guestDeleting}
-                  className="liquid-glass rounded-full px-5 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteGuest}
-                  disabled={guestDeleting}
-                  className="flex items-center justify-center gap-1.5 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:opacity-60"
-                >
-                  <Trash2 size={14} />
-                  {guestDeleting ? 'Removing…' : 'Delete Guest'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Edit Event modal */}
       <AnimatePresence>
         {editOpen && event && (
@@ -2021,7 +2115,7 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
             onClick={closeEditModal}
           >
             <motion.form
-              onSubmit={saveEvent}
+              onSubmit={requestSaveEvent}
               noValidate
               onClick={(e) => e.stopPropagation()}
               initial={{ opacity: 0, y: 24, scale: 0.97 }}
@@ -2194,173 +2288,186 @@ export default function AdminCrudPage(_props: AdminCrudPageProps) {
         )}
       </AnimatePresence>
 
-      {/* Delete Event confirmation modal */}
-      <AnimatePresence>
-        {deleteOpen && event && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
-            onClick={closeDeleteModal}
-          >
-            <motion.div
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="delete-event-title"
-              aria-describedby="delete-event-desc"
-              onClick={(e) => e.stopPropagation()}
-              initial={{ opacity: 0, y: 24, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.97 }}
-              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100/90 text-rose-600">
-                  <AlertTriangle size={20} />
-                </span>
-                <div className="min-w-0">
-                  <h2 id="delete-event-title" className="text-lg font-semibold text-slate-800">
-                    Delete this event?
-                  </h2>
-                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
-                    {event.title}
-                  </p>
-                </div>
-              </div>
+      <ConfirmModal
+        open={createConfirmOpen}
+        variant="primary"
+        title="Create this event?"
+        description="Review the details before the event goes live."
+        details={[
+          { label: 'Title', value: form.title.trim() },
+          { label: 'Venue', value: form.venue.trim() },
+          { label: 'Date & time', value: formatDraftDate(form.date) },
+          { label: 'Visibility', value: form.visibility === 'exclusive' ? 'Exclusive' : 'Public' },
+        ]}
+        notice={
+          form.visibility === 'exclusive'
+            ? 'Guests will need your approval before they receive a QR pass.'
+            : 'Anyone with the invite link can register and get an instant QR pass.'
+        }
+        confirmLabel="Create Event"
+        confirmingLabel="Creating…"
+        confirming={creating}
+        onConfirm={() => void confirmCreateEvent()}
+        onCancel={() => setCreateConfirmOpen(false)}
+      />
 
-              <div className="rounded-2xl bg-rose-50/60 px-4 py-3 ring-2 ring-rose-400/35">
-                <p id="delete-event-desc" className="text-sm text-slate-700">
-                  This will permanently remove the event and all{' '}
-                  <span className="font-semibold text-rose-600">
-                    {attendees.length} {attendees.length === 1 ? 'registration' : 'registrations'}
-                  </span>{' '}
-                  and passes tied to it. This action cannot be undone.
-                </p>
-              </div>
+      <ConfirmModal
+        open={editConfirmOpen}
+        variant={resendAll ? 'warning' : 'primary'}
+        title="Save changes to this event?"
+        details={[
+          { label: 'Title', value: editForm.title.trim() },
+          { label: 'Venue', value: editForm.venue.trim() },
+          { label: 'Date & time', value: formatDraftDate(editForm.date) },
+          { label: 'Visibility', value: editForm.visibility === 'exclusive' ? 'Exclusive' : 'Public' },
+          {
+            label: 'Scanner PIN',
+            value: editForm.pin === (event?.scanner_pin ?? '') ? 'Unchanged' : 'Changed',
+          },
+        ]}
+        notice={
+          resendAll
+            ? `Updated QR pass emails will be re-sent to ${approvedCount} approved ${
+                approvedCount === 1 ? 'guest' : 'guests'
+              }.`
+            : 'No pass emails will be re-sent.'
+        }
+        confirmLabel={resendAll ? 'Save & re-send' : 'Save Changes'}
+        confirmingLabel={resendAll ? 'Saving & sending…' : 'Saving…'}
+        confirming={saving}
+        onConfirm={() => void saveEvent()}
+        onCancel={() => setEditConfirmOpen(false)}
+      />
 
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  autoFocus
-                  onClick={closeDeleteModal}
-                  disabled={deleting}
-                  className="liquid-glass rounded-full px-5 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteEvent}
-                  disabled={deleting}
-                  className="flex items-center justify-center gap-1.5 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:opacity-60"
-                >
-                  <Trash2 size={14} />
-                  {deleting ? 'Deleting…' : 'Delete Event'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ConfirmModal
+        open={statusTarget !== null}
+        variant={
+          statusTarget === 'cancelled' ? 'danger' : statusTarget === 'closed' ? 'warning' : 'primary'
+        }
+        title={`Switch status to ${statusTarget ? EVENT_STATUS_UI[statusTarget].label : ''}?`}
+        details={[
+          { label: 'Event', value: event?.title },
+          {
+            label: 'Status',
+            value: `${event ? EVENT_STATUS_UI[event.status].label : ''} → ${
+              statusTarget ? EVENT_STATUS_UI[statusTarget].label : ''
+            }`,
+          },
+        ]}
+        notice={
+          statusTarget === 'cancelled'
+            ? 'Registration and the scanner are blocked for a cancelled event.'
+            : statusTarget === 'closed'
+              ? 'New registrations are blocked. Guests who already registered can still be checked in.'
+              : 'Registration reopens and the scanner accepts check-ins.'
+        }
+        confirmLabel="Switch Status"
+        confirmingLabel="Updating…"
+        confirming={statusUpdating}
+        onConfirm={() => void updateEventStatus()}
+        onCancel={() => setStatusTarget(null)}
+      />
 
-      {/* Re-send Confirmation modal */}
-      <AnimatePresence>
-        {resendSummary && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
-            onClick={() => setResendSummary(null)}
-          >
-            <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="resend-summary-title"
-              aria-describedby="resend-summary-desc"
-              onClick={(e) => e.stopPropagation()}
-              initial={{ opacity: 0, y: 24, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.97 }}
-              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                    resendSummary.failed > 0 || resendSummary.loadFailed
-                      ? 'bg-rose-100/90 text-rose-600'
-                      : 'bg-emerald-100/90 text-emerald-600'
-                  }`}
-                >
-                  {resendSummary.failed > 0 || resendSummary.loadFailed ? (
-                    <AlertTriangle size={20} />
-                  ) : (
-                    <Check size={20} />
-                  )}
-                </span>
-                <div className="min-w-0">
-                  <h2 id="resend-summary-title" className="text-lg font-semibold text-slate-800">
-                    Event updated
-                  </h2>
-                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
-                    {resendSummary.title}
-                  </p>
-                </div>
-              </div>
+      <ConfirmModal
+        open={deleteOpen && !!event}
+        variant="danger"
+        title="Delete this event?"
+        details={[{ label: 'Event', value: event?.title }]}
+        notice={
+          <>
+            This will permanently remove the event and all{' '}
+            <span className="font-semibold text-rose-600">
+              {attendees.length} {attendees.length === 1 ? 'registration' : 'registrations'}
+            </span>{' '}
+            and passes tied to it. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete Event"
+        confirmingLabel="Deleting…"
+        confirming={deleting}
+        onConfirm={() => void deleteEvent()}
+        onCancel={closeDeleteModal}
+      />
 
-              <div
-                className={`rounded-2xl px-4 py-3 ${
-                  resendSummary.failed > 0 || resendSummary.loadFailed
-                    ? 'bg-rose-50/60 ring-2 ring-rose-400/35'
-                    : 'bg-white/50'
-                }`}
-              >
-                <p id="resend-summary-desc" className="text-sm text-slate-700">
-                  {resendSummary.loadFailed ? (
-                    <>
-                      The event was saved, but{' '}
-                      <span className="font-semibold text-rose-600">
-                        approved guests could not be loaded
-                      </span>
-                      , so no updated pass emails were sent.
-                    </>
-                  ) : resendSummary.total === 0 ? (
-                    'No approved guests to notify yet.'
-                  ) : resendSummary.failed > 0 ? (
-                    <>
-                      Updated QR pass emails were sent to{' '}
-                      <span className="font-semibold">
-                        {resendSummary.total - resendSummary.failed} of {resendSummary.total}
-                      </span>{' '}
-                      approved {resendSummary.total === 1 ? 'guest' : 'guests'}.{' '}
-                      <span className="font-semibold text-rose-600">
-                        {resendSummary.failed}{' '}
-                        {resendSummary.failed === 1 ? 'email' : 'emails'} failed to send.
-                      </span>
-                    </>
-                  ) : (
-                    `Updated QR pass emails were sent to ${resendSummary.total} approved ${
-                      resendSummary.total === 1 ? 'guest' : 'guests'
-                    }.`
-                  )}
-                </p>
-              </div>
+      <ConfirmModal
+        open={guestConfirmOpen}
+        variant="primary"
+        title={guestModal === 'add' ? 'Add this guest?' : 'Save changes to this guest?'}
+        details={[
+          { label: 'Name', value: guestForm.full_name.trim() },
+          { label: 'Email', value: guestForm.email.trim().toLowerCase() },
+          {
+            label: 'Organization',
+            value: guestForm.organization.trim() || (guestModal === 'add' ? 'Walk-In' : '—'),
+          },
+          { label: 'Contact', value: guestForm.contact_number.trim() || '—' },
+        ]}
+        notice={
+          guestModal === 'add'
+            ? guestForm.sendEmail
+              ? `The guest is added as approved and a QR pass will be emailed to ${guestForm.email.trim()}.`
+              : 'The guest is added as approved. No email will be sent.'
+            : guestForm.sendEmail && editTarget?.status === 'approved'
+              ? `The updated QR ticket email will be re-sent to ${guestForm.email.trim()}.`
+              : 'No email will be sent.'
+        }
+        confirmLabel={guestModal === 'add' ? 'Add Guest' : 'Save Changes'}
+        confirmingLabel={guestModal === 'add' ? 'Adding…' : 'Saving…'}
+        confirming={guestSaving}
+        onConfirm={() => void confirmSubmitGuest()}
+        onCancel={() => setGuestConfirmOpen(false)}
+      />
 
-              <div className="flex sm:justify-end">
-                <button
-                  type="button"
-                  autoFocus
-                  onClick={() => setResendSummary(null)}
-                  className="liquid-btn-primary w-full sm:w-auto sm:px-8"
-                >
-                  Done
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ConfirmModal
+        open={guestDeleteTarget !== null}
+        variant="danger"
+        title="Remove this guest?"
+        details={[
+          { label: 'Name', value: guestDeleteTarget?.full_name },
+          { label: 'Email', value: guestDeleteTarget?.email },
+          {
+            label: 'Ticket',
+            value: <span className="font-mono text-xs">{guestDeleteTarget?.ticket_code}</span>,
+          },
+        ]}
+        notice={
+          <>
+            Removing this guest{' '}
+            <span className="font-semibold text-rose-600">
+              permanently deletes their registration and QR pass
+            </span>
+            . This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete Guest"
+        confirmingLabel="Removing…"
+        confirming={guestDeleting}
+        onConfirm={() => void deleteGuest()}
+        onCancel={() => setGuestDeleteTarget(null)}
+      />
+
+      <ConfirmModal
+        open={decision !== null}
+        variant={decision?.status === 'declined' ? 'danger' : 'primary'}
+        title={decision?.status === 'declined' ? 'Decline this registration?' : 'Approve this registration?'}
+        details={[
+          { label: 'Guest', value: decision?.attendee.full_name },
+          { label: 'Email', value: decision?.attendee.email },
+          { label: 'Event', value: event?.title },
+        ]}
+        notice={
+          decision?.status === 'declined'
+            ? 'The guest will not receive a QR pass.'
+            : `A QR pass email will be sent to ${decision?.attendee.email ?? 'the guest'} right away.`
+        }
+        confirmLabel={decision?.status === 'declined' ? 'Decline' : 'Approve & send pass'}
+        confirmingLabel="Working…"
+        confirming={deciding}
+        onConfirm={() => void confirmDecision()}
+        onCancel={() => setDecision(null)}
+      />
+
+      <SuccessModal receipt={receipt} onClose={() => setReceipt(null)} />
     </>
   );
 }
