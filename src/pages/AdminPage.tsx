@@ -20,6 +20,8 @@ import {
   ScanLine,
   Ticket,
   ShieldCheck,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import type {
   UserProfile,
@@ -602,6 +604,8 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState<{
     title: string;
     venue: string;
@@ -622,6 +626,11 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     setModalOpen(false);
   };
 
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setDeleteOpen(false);
+  };
+
   const clearFieldError = (key: FieldKey) =>
     setFieldErrors((prev) => {
       if (!prev[key]) return prev;
@@ -639,6 +648,15 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
     else if (!/^\d{4}$/.test(form.pin)) errors.pin = 'Scanner PIN must be exactly 4 digits.';
     return errors;
   };
+
+  useEffect(() => {
+    if (!deleteOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !deleting) setDeleteOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [deleteOpen, deleting]);
 
   useEffect(() => {
     let cancelled = false;
@@ -715,6 +733,26 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
       return;
     }
     setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, status } : e)));
+  };
+
+  const deleteEvent = async () => {
+    if (!event || deleting) return;
+    const deletedId = event.id;
+    setDeleting(true);
+    const { error } = await supabase.from('events').delete().eq('id', deletedId);
+    setDeleting(false);
+    if (error) {
+      setError(error.message);
+      setDeleteOpen(false);
+      return;
+    }
+    const nextEvents = events.filter((e) => e.id !== deletedId);
+    setEvents(nextEvents);
+    setEventId((nextEvents.find((e) => e.status === 'active') ?? nextEvents[0])?.id ?? '');
+    setAttendees([]);
+    setQuery('');
+    setFilter('all');
+    setDeleteOpen(false);
   };
 
   const updateRegistrationStatus = async (id: string, status: RegistrationStatus) => {
@@ -999,6 +1037,15 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
             >
               {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
               {copied ? 'Copied!' : 'Copy Link'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              disabled={!event || deleting}
+              aria-label="Delete event"
+              className="liquid-glass flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50/80 disabled:opacity-50"
+            >
+              <Trash2 size={14} /> Delete Event
             </button>
             {event && (
               <div className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto">
@@ -1411,6 +1458,76 @@ export default function AdminPage({ user, onSignOut }: AdminPageProps) {
                 {creating ? 'Creating…' : 'Create Event'}
               </button>
             </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Event confirmation modal */}
+      <AnimatePresence>
+        {deleteOpen && event && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/30 p-4 backdrop-blur-sm"
+            onClick={closeDeleteModal}
+          >
+            <motion.div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-event-title"
+              aria-describedby="delete-event-desc"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.97 }}
+              className="liquid-glass my-auto w-full max-w-md space-y-4 rounded-3xl p-5 sm:p-6"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100/90 text-rose-600">
+                  <AlertTriangle size={20} />
+                </span>
+                <div className="min-w-0">
+                  <h2 id="delete-event-title" className="text-lg font-semibold text-slate-800">
+                    Delete this event?
+                  </h2>
+                  <p className="mt-0.5 break-words text-sm font-medium text-slate-700">
+                    {event.title}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-rose-50/60 px-4 py-3 ring-2 ring-rose-400/35">
+                <p id="delete-event-desc" className="text-sm text-slate-700">
+                  This will permanently remove the event and all{' '}
+                  <span className="font-semibold text-rose-600">
+                    {attendees.length} {attendees.length === 1 ? 'registration' : 'registrations'}
+                  </span>{' '}
+                  and passes tied to it. This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={closeDeleteModal}
+                  disabled={deleting}
+                  className="liquid-glass rounded-full px-5 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteEvent}
+                  disabled={deleting}
+                  className="flex items-center justify-center gap-1.5 rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:opacity-60"
+                >
+                  <Trash2 size={14} />
+                  {deleting ? 'Deleting…' : 'Delete Event'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
