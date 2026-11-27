@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useScroll, useSpring } from 'motion/react';
 import {
+  ArrowUp,
   CalendarCog,
   Globe,
   LayoutDashboard,
@@ -35,6 +36,7 @@ interface NavItem {
 }
 
 const COLLAPSE_KEY = 'passflow_sidebar_collapsed';
+const BACK_TO_TOP_THRESHOLD = 400;
 
 const ScannerSlugContext = createContext<(slug: string | null) => void>(() => {});
 
@@ -80,8 +82,19 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [scannerSlug, setScannerSlug] = useState<string | null>(null);
+  const [showTop, setShowTop] = useState(false);
+
+  const { scrollYProgress } = useScroll();
+  const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 28, restDelta: 0.001 });
 
   const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > BACK_TO_TOP_THRESHOLD);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   useEffect(() => {
     setOpen(false);
@@ -199,6 +212,17 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
   return (
     <ScannerSlugContext.Provider value={setScannerSlug}>
       <div className="pastel-mesh-bg min-h-screen">
+        {/* Scroll progress bar */}
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-x-0 top-0 z-[60] h-1 bg-white/30 backdrop-blur-sm"
+        >
+          <motion.div
+            style={{ scaleX: progress }}
+            className="h-full origin-left rounded-r-full bg-gradient-to-r from-violet-500 via-[#bbaeec] to-[#f0c9ef] shadow-[0_0_10px_rgba(139,92,246,0.55)]"
+          />
+        </div>
+
         {/* Desktop side rail */}
         <motion.aside
           aria-label="Sidebar"
@@ -442,6 +466,28 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
         >
           {children}
         </main>
+
+        {/* Back to top */}
+        <AnimatePresence>
+          {showTop && (
+            <motion.button
+              key="app-shell-back-to-top"
+              type="button"
+              aria-label="Back to top"
+              title="Back to top"
+              initial={{ opacity: 0, y: 16, scale: 0.8 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.8 }}
+              whileHover={{ y: -3 }}
+              whileTap={{ scale: 0.92 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="liquid-glass fixed bottom-6 right-6 z-40 flex size-12 items-center justify-center rounded-full text-violet-700"
+            >
+              <ArrowUp size={20} className="relative z-10" />
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
     </ScannerSlugContext.Provider>
   );

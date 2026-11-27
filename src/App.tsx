@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { UserProfile } from './types/database';
 import { supabase, fetchUserProfile } from './lib/supabase';
 import AppShell from './components/AppShell';
+import LoadingScreen from './components/LoadingScreen';
 import AuthPage from './pages/AuthPage';
 import PublicEventsPage from './pages/PublicEventsPage';
 import RegisterPage from './pages/RegisterPage';
@@ -10,6 +11,7 @@ import MyPassesPage from './pages/MyPassesPage';
 import ScannerPage from './pages/ScannerPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import AdminCrudPage from './pages/AdminCrudPage';
+import NotFoundPage from './pages/NotFoundPage';
 
 function navigateTo(path: string) {
   if (window.location.pathname === path) return;
@@ -63,6 +65,15 @@ export default function App() {
     window.history.replaceState({}, '', `/events${window.location.search}`);
     setPath('/events');
   }, [path]);
+
+  // Authenticated visitors landing on `/` are sent to their home page.
+  useEffect(() => {
+    if (initializing || !currentUser) return;
+    if (path !== '/') return;
+    const home = currentUser.role === 'admin' ? '/admin' : '/my-passes';
+    window.history.replaceState({}, '', home);
+    setPath(home);
+  }, [initializing, currentUser, path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,21 +166,15 @@ export default function App() {
   }
 
   if (initializing) {
-    return (
-      <div className="pastel-mesh-bg min-h-screen flex items-center justify-center p-4">
-        <div className="liquid-glass rounded-full px-6 py-3 text-sm font-medium text-slate-700 animate-pulse">
-          Loading…
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
+  const isRoot = routePath === '/';
   const isAdminRoute = routePath === '/admin' || routePath.startsWith('/admin/');
   const isManageRoute = routePath === '/admin/manage' || routePath.startsWith('/admin/manage/');
   const isPassesRoute = routePath === '/my-passes' || routePath.startsWith('/my-passes/');
   const isEvents = isEventsPath(routePath);
   const isRegister = isRegisterPath(routePath);
-  const isKnownRoute = isAdminRoute || isPassesRoute || isEvents || isRegister;
 
   // ---------- Auth gates (no shell) ----------
   if (isAdminRoute && currentUser?.role !== 'admin') {
@@ -178,7 +183,7 @@ export default function App() {
   if (isPassesRoute && !currentUser) {
     return <AuthPage onAuthSuccess={handleAuthSuccess} />;
   }
-  if (!isKnownRoute && !currentUser) {
+  if (isRoot && !currentUser) {
     return <AuthPage onAuthSuccess={handleAuthSuccess} />;
   }
 
@@ -194,10 +199,12 @@ export default function App() {
     content = <PublicEventsPage viewer={currentUser} />;
   } else if (isRegister) {
     content = <RegisterPage viewer={currentUser} embedded />;
-  } else if (currentUser?.role === 'admin') {
+  } else if (isRoot && currentUser?.role === 'admin') {
     content = <AdminDashboardPage profile={currentUser} onSignOut={handleSignOut} />;
-  } else if (currentUser) {
+  } else if (isRoot && currentUser) {
     content = <MyPassesPage user={currentUser} onSignOut={handleSignOut} embedded />;
+  } else {
+    content = <NotFoundPage user={currentUser} />;
   }
 
   return (
