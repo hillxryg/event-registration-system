@@ -27,3 +27,6 @@ dist-ssr
 inspo/
 .env
 .env.local
+
+# Mardkdown file
+PROJECT_SPEC.md

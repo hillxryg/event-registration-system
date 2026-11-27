@@ -1,75 +1,57 @@
-# React + TypeScript + Vite
+# PassFlow
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A full-stack **Event Registration & QR Check-In System** built with React, TypeScript, Tailwind CSS, and Supabase.
 
-Currently, two official plugins are available:
+**Live App:** [https://passflow-events.vercel.app](https://passflow-events.vercel.app)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Public & Exclusive Events:** Browse open events at `/register` or register via shareable `/register/:slug` invite links, with admin approval workflows for exclusive events.
+- **Automated QR Ticket Delivery:** Generates inline PNG QR passes via a Supabase Edge Function (`send-ticket-email`) and delivers HTML tickets over Gmail SMTP (`nodemailer` + `qrcode`).
+- **Guest Pass Wallet (`/my-passes`):** Magic-link OTP authentication and `localStorage` pass persistence so attendees can view their QR pass or cancel attendance anytime.
+- **Live QR Scanner (`/scanner/:slug`):** PIN-protected camera check-in (`html5-qrcode`) supporting `active` and `closed` events while blocking `cancelled` events.
+- **Admin Dashboard (`/admin`):**
+  - Searchable, status-filtered event switcher (`active`, `closed`, `cancelled`) and event creation/deletion.
+  - Real-time KPI cards (Total Registered, Checked In %, Pending Check-In).
+  - Full guest-list CRUD (walk-in creation with optional QR email dispatch, guest detail editing with email re-send, attendee deletion, approval/decline, manual check-in toggle, and CSV export).
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **Frontend:** React 19, Vite, TypeScript, Tailwind CSS v4, Motion (`motion/react`), Lucide Icons
+- **QR Tools:** `qrcode.react` (client-side pass rendering), `html5-qrcode` (camera check-in scanner)
+- **Backend & Auth:** Supabase (PostgreSQL with Row-Level Security, Auth with Magic Link OTP, Edge Functions)
+- **Email Delivery:** Nodemailer + Gmail SMTP
+- **Deployment:** Vercel
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Project Structure
 
-```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+```text
+event-checkin/
+├── public/
+│   └── passflow-logo.svg          # Brand logo & favicon
+├── src/
+│   ├── lib/
+│   │   └── supabase.ts            # Supabase client & profile helper
+│   ├── pages/
+│   │   ├── AuthPage.tsx           # Password & magic-link OTP authentication
+│   │   ├── GuestDashboardPage.tsx # Guest /my-passes QR wallet & cancellation
+│   │   ├── RegisterPage.tsx       # Public directory & /register/:slug registration
+│   │   ├── ScannerPage.tsx        # PIN-locked QR code check-in scanner
+│   │   └── AdminPage.tsx          # Event & guest-list CRUD dashboard
+│   ├── types/
+│   │   └── database.ts            # TypeScript database contracts
+│   ├── App.tsx                    # Public & role-protected routing
+│   └── index.css                  # Liquid-glass design tokens & mesh background
+├── supabase/
+│   ├── functions/
+│   │   └── send-ticket-email/
+│   │       └── index.ts           # Edge Function for QR generation & email delivery
+│   └── schema.sql                 # Database schema & RLS policies
+├── index.html
+└── vercel.json                    # SPA rewrite rules
