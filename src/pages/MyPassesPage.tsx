@@ -24,6 +24,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { Attendee, EventItem, RegistrationStatus, UserProfile } from '../types/database';
 import { supabase } from '../lib/supabase';
+import ConfirmModal, { SuccessModal, type SuccessReceipt } from '../components/ConfirmModal';
 
 const EVENT_FIELDS = 'id, slug, title, description, event_date, venue, visibility, status';
 
@@ -85,11 +86,16 @@ interface RegistrationCardProps {
   index: number;
   cancelling: boolean;
   onViewPass: () => void;
-  onCancel: () => Promise<void>;
+  onRequestCancel: () => void;
 }
 
-function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: RegistrationCardProps) {
-  const [confirming, setConfirming] = useState(false);
+function RegistrationCard({
+  row,
+  index,
+  cancelling,
+  onViewPass,
+  onRequestCancel,
+}: RegistrationCardProps) {
   const ev = row.events;
   const meta = STATUS_META[row.status];
   const canCancel = !row.checked_in && (row.status === 'approved' || row.status === 'pending');
@@ -162,10 +168,10 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
           View QR Pass
         </button>
 
-        {canCancel && !confirming && (
+        {canCancel && (
           <button
             type="button"
-            onClick={() => setConfirming(true)}
+            onClick={onRequestCancel}
             disabled={cancelling}
             className={`${pillBase} ${pillIdle} h-11 w-full justify-center px-4 text-rose-700 disabled:opacity-60 sm:w-auto`}
           >
@@ -173,47 +179,6 @@ function RegistrationCard({ row, index, cancelling, onViewPass, onCancel }: Regi
           </button>
         )}
       </div>
-
-      <AnimatePresence initial={false}>
-        {canCancel && confirming && (
-          <motion.div
-            role="alertdialog"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="mt-4 rounded-2xl border border-rose-200/80 bg-rose-100/60 p-4">
-              <p className="text-sm font-bold text-rose-800">Cancel your attendance?</p>
-              <p className="mt-0.5 text-xs font-medium text-rose-800/80">
-                Your QR pass will stop working. This can’t be undone from here.
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <button
-                  type="button"
-                  disabled={cancelling}
-                  onClick={async () => {
-                    await onCancel();
-                    setConfirming(false);
-                  }}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-rose-600 px-4 text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-60 sm:w-auto"
-                >
-                  {cancelling && <Loader2 size={14} className="animate-spin" />}
-                  Yes, cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={cancelling}
-                  onClick={() => setConfirming(false)}
-                  className={`${pillBase} ${pillIdle} h-10 w-full justify-center px-4 sm:w-auto`}
-                >
-                  Keep my spot
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.article>
   );
 }
@@ -344,6 +309,8 @@ export default function MyPassesPage({ user, embedded = false }: MyPassesPagePro
   const [filter, setFilter] = useState<FilterKey>('all');
   const [passId, setPassId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Registration | null>(null);
+  const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
 
@@ -408,7 +375,7 @@ export default function MyPassesPage({ user, embedded = false }: MyPassesPagePro
   const activePass = useMemo(() => rows.find((r) => r.id === passId) ?? null, [rows, passId]);
   const closePass = useCallback(() => setPassId(null), []);
 
-  const handleCancel = async (row: Registration) => {
+  const handleCancel = async (row: Registration): Promise<boolean> => {
     setActionError(null);
     setCancellingId(row.id);
     const previous = row.status;
@@ -427,8 +394,28 @@ export default function MyPassesPage({ user, embedded = false }: MyPassesPagePro
       setActionError(
         'We couldn’t cancel that registration. It may already be checked in. Please try again.',
       );
+      setCancellingId(null);
+      return false;
     }
     setCancellingId(null);
+    return true;
+  };
+
+  const confirmCancel = async () => {
+    const row = cancelTarget;
+    if (!row || cancellingId) return;
+    const ok = await handleCancel(row);
+    setCancelTarget(null);
+    if (ok) {
+      setReceipt({
+        title: 'Attendance cancelled',
+        details: [
+          { label: 'Event', value: row.events.title },
+          { label: 'Ticket', value: <span className="font-mono text-xs">{row.ticket_code}</span> },
+        ],
+        notice: 'Your registration was cancelled and your QR pass is no longer valid.',
+      });
+    }
   };
 
   const shell = embedded
@@ -645,7 +632,7 @@ export default function MyPassesPage({ user, embedded = false }: MyPassesPagePro
                   index={i}
                   cancelling={cancellingId === row.id}
                   onViewPass={() => setPassId(row.id)}
-                  onCancel={() => handleCancel(row)}
+                  onRequestCancel={() => setCancelTarget(row)}
                 />
               ))}
             </AnimatePresence>
@@ -656,6 +643,28 @@ export default function MyPassesPage({ user, embedded = false }: MyPassesPagePro
       <AnimatePresence>
         {activePass && <PassModal key={activePass.id} row={activePass} onClose={closePass} />}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={cancelTarget !== null}
+        variant="danger"
+        title="Cancel your attendance?"
+        details={[
+          { label: 'Event', value: cancelTarget?.events.title },
+          {
+            label: 'Ticket',
+            value: <span className="font-mono text-xs">{cancelTarget?.ticket_code}</span>,
+          },
+        ]}
+        notice="Cancelling voids your QR pass and cannot be undone from here."
+        confirmLabel="Yes, cancel"
+        cancelLabel="Keep my spot"
+        confirmingLabel="Cancelling…"
+        confirming={cancellingId !== null}
+        onConfirm={() => void confirmCancel()}
+        onCancel={() => setCancelTarget(null)}
+      />
+
+      <SuccessModal receipt={receipt} onClose={() => setReceipt(null)} />
     </div>
   );
 }

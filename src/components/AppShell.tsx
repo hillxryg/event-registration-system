@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UserProfile } from '../types/database';
+import ConfirmModal from './ConfirmModal';
 
 interface AppShellProps {
   children: ReactNode;
@@ -86,6 +87,8 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [scannerSlug, setScannerSlug] = useState<string | null>(null);
   const [showTop, setShowTop] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const { scrollYProgress } = useScroll();
   const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 28, restDelta: 0.001 });
@@ -176,7 +179,18 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
 
   const signOut = () => {
     setOpen(false);
-    void onSignOut();
+    setSignOutOpen(true);
+  };
+
+  const confirmSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await onSignOut();
+    } finally {
+      setSigningOut(false);
+      setSignOutOpen(false);
+    }
   };
 
   const signIn = () => {
@@ -492,6 +506,22 @@ export default function AppShell({ children, user, onSignOut, onSignIn }: AppShe
           )}
         </AnimatePresence>
       </div>
+
+      <ConfirmModal
+        open={signOutOpen}
+        variant="primary"
+        title="Sign out of PassFlow?"
+        details={[
+          { label: 'Account', value: user?.email },
+          { label: 'Role', value: roleLabel },
+        ]}
+        notice="You’ll need to sign in again to view your passes or manage events."
+        confirmLabel="Sign Out"
+        confirmingLabel="Signing out…"
+        confirming={signingOut}
+        onConfirm={() => void confirmSignOut()}
+        onCancel={() => setSignOutOpen(false)}
+      />
     </ScannerSlugContext.Provider>
   );
 }

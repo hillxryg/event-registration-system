@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { UserProfile } from './types/database';
 import { supabase, fetchUserProfile } from './lib/supabase';
 import AppShell from './components/AppShell';
+import { SuccessModal, type SuccessReceipt } from './components/ConfirmModal';
 import LoadingScreen from './components/LoadingScreen';
 import AuthPage from './pages/AuthPage';
 import PublicEventsPage from './pages/PublicEventsPage';
@@ -47,7 +48,7 @@ function consumeRedirect(): string | null {
   }
 }
 
-export default function App() {
+function AppRoutes({ onSignedOut }: { onSignedOut: (receipt: SuccessReceipt) => void }) {
   const [path, setPath] = useState(() => window.location.pathname);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [initializing, setInitializing] = useState(true);
@@ -149,10 +150,16 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    const email = currentUser?.email;
     await supabase.auth.signOut();
     loadedUserId.current = null;
     setCurrentUser(null);
     navigateTo('/');
+    onSignedOut({
+      title: 'Signed out',
+      details: email ? [{ label: 'Account', value: email }] : undefined,
+      notice: 'You have been signed out of PassFlow successfully.',
+    });
   };
 
   const handleSignIn = () => {
@@ -212,5 +219,15 @@ export default function App() {
     <AppShell user={currentUser} onSignOut={handleSignOut} onSignIn={handleSignIn}>
       {content}
     </AppShell>
+  );
+}
+
+export default function App() {
+  const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
+  return (
+    <>
+      <AppRoutes onSignedOut={setReceipt} />
+      <SuccessModal receipt={receipt} onClose={() => setReceipt(null)} />
+    </>
   );
 }
