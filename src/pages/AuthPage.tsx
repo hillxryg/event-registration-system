@@ -28,7 +28,7 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 
 const MODES: { key: Mode; label: string }[] = [
   { key: 'signin', label: 'Sign In' },
-  { key: 'signup', label: 'Create Account' },
+  { key: 'signup', label: 'Sign Up' },
   { key: 'magic', label: 'Email Link' },
 ];
 
