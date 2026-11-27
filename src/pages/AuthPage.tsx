@@ -226,7 +226,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
           </p>
 
           {/* Segmented pill switcher */}
-          <div className="liquid-glass relative mt-6 flex rounded-full p-1">
+          <div className="liquid-glass relative mt-6 grid grid-cols-3 rounded-full p-1">
             {MODES.map((m) => (
               <button
                 key={m.key}
@@ -237,7 +237,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                   setNotice(null);
                   setFieldErrors({});
                 }}
-                className="relative z-10 flex-1 whitespace-nowrap rounded-full px-2 py-2 text-xs font-medium sm:px-2.5 sm:text-sm"
+                className="relative z-10 min-w-0 whitespace-nowrap rounded-full px-2 py-2 text-center text-xs font-medium sm:px-2.5 sm:text-sm"
               >
                 {mode === m.key && (
                   <motion.span
@@ -253,7 +253,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
             ))}
           </div>
 
-          <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
             <AnimatePresence initial={false}>
               {mode === 'signup' && (
                 <motion.div
@@ -261,7 +261,7 @@ export default function AuthPage({ onAuthSuccess }: AuthPageProps) {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="-mx-1 -my-1 overflow-hidden px-1 pt-0.5"
+                  className="-mx-1 overflow-hidden px-1 pb-1"
                 >
                   <div className="relative">
                     <span className={iconBadge}>
