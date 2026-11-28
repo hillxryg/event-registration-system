@@ -140,12 +140,12 @@ Deno.serve(async (req) => {
       ? `
           <!-- Updated Event Notice -->
           <tr>
-            <td style="padding:20px 28px 0;">
-              <div style="background:#fff1f2;border:1px solid #fda4af;border-radius:16px;padding:14px 16px;">
-                <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e11d48;">
+            <td style="padding:24px 32px 0;">
+              <div style="background-color:#fdf2f4;background:linear-gradient(135deg,rgba(241,201,207,0.45) 0%,rgba(240,201,239,0.35) 100%);border:1px solid #f1c9cf;border-radius:18px;padding:14px 18px;">
+                <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:#be185d;">
                   Event Details Updated
                 </p>
-                <p style="margin:6px 0 0;font-size:13px;line-height:1.5;font-weight:500;color:#3f3f46;">
+                <p style="margin:6px 0 0;font-size:13px;line-height:1.55;font-weight:500;color:#3f3f46;">
                   The organizer has updated this event's details (title, date/time, or venue). Please review them above.
                   <strong style="color:#18181b;">Your existing QR pass below remains valid for entry.</strong>
                 </p>
@@ -163,37 +163,38 @@ Deno.serve(async (req) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Your PassFlow Ticket</title>
 </head>
-<body style="margin:0;padding:24px;background-color:#f4f4f5;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#18181b;">
+<body style="margin:0;padding:32px 16px;background-color:#f4f1fa;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#18181b;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" style="max-width:480px;background:#ffffff;border-radius:28px;overflow:hidden;border:1px solid #e4e4e7;box-shadow:0 12px 32px rgba(24,24,27,0.08);" cellspacing="0" cellpadding="0">
-          <!-- Header -->
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:32px;overflow:hidden;border:1px solid #ebe6f7;box-shadow:0 16px 40px rgba(187,174,236,0.28);" cellspacing="0" cellpadding="0">
+
+          <!-- Gradient Header -->
           <tr>
-            <td style="background:#18181b;padding:28px 28px 24px;color:#ffffff;">
-              <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;color:#34d399;">
-                PassFlow Official Ticket
+            <td style="background-color:#e4c5f0;background-image:linear-gradient(120deg,#bbaeec 0%,#f0c9ef 58%,#f1c9cf 100%);padding:32px 32px 28px;">
+              <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2.6px;text-transform:uppercase;color:#4c3f8f;">
+                PassFlow Events · Official Ticket
               </p>
-              <h1 style="margin:8px 0 0;font-size:22px;line-height:1.25;font-weight:800;color:#ffffff;">
+              <h1 style="margin:10px 0 0;font-size:26px;line-height:1.2;font-weight:800;color:#18181b;">
                 ${safeEventTitle}
               </h1>
-              <p style="margin:10px 0 0;font-size:13px;line-height:1.5;color:#a1a1aa;">
+              <p style="margin:12px 0 0;font-size:14px;line-height:1.6;font-weight:500;color:#27272a;">
                 ${formattedDate}<br/>
-                <strong style="color:#e4e4e7;font-weight:600;">${safeVenue}</strong>
+                <strong style="color:#18181b;font-weight:700;">${safeVenue}</strong>
               </p>
             </td>
           </tr>
 ${updatedBanner}
           <!-- Attendee Info -->
           <tr>
-            <td style="padding:24px 28px 16px;">
-              <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:#71717a;">
+            <td style="padding:28px 32px 8px;">
+              <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#7c6fc4;">
                 Attendee
               </p>
-              <p style="margin:4px 0 0;font-size:18px;font-weight:700;color:#18181b;">
+              <p style="margin:6px 0 0;font-size:20px;font-weight:800;color:#18181b;">
                 ${safeName}
               </p>
-              <p style="margin:2px 0 0;font-size:13px;font-weight:500;color:#52525b;">
+              <p style="margin:2px 0 0;font-size:14px;font-weight:500;color:#52525b;">
                 ${safeOrg}
               </p>
             </td>
@@ -201,14 +202,18 @@ ${updatedBanner}
 
           <!-- QR Pass -->
           <tr>
-            <td align="center" style="padding:12px 28px 24px;">
-              <div style="display:inline-block;background:#fafafa;border:1px solid #e4e4e7;border-radius:22px;padding:18px;">
-                <img src="cid:ticket-qr" alt="Ticket QR Code" width="210" height="210" style="display:block;border-radius:12px;" />
+            <td align="center" style="padding:16px 32px 28px;">
+              <div style="display:inline-block;background-color:#f7f4fd;background-image:linear-gradient(135deg,#f3effc 0%,#fbeef9 100%);border:1px solid #e4def5;border-radius:26px;padding:16px;">
+                <div style="background:#ffffff;border-radius:18px;padding:14px;">
+                  <img src="cid:ticket-qr" alt="Ticket QR Code" width="210" height="210" style="display:block;border-radius:8px;" />
+                </div>
               </div>
-              <p style="margin:14px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:15px;font-weight:700;letter-spacing:2px;color:#18181b;">
-                ${safeTicket}
+              <p style="margin:18px 0 0;">
+                <span style="display:inline-block;background-color:#f1ecfb;border:1px solid #e0d8f5;border-radius:999px;padding:8px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:15px;font-weight:700;letter-spacing:2px;color:#4c3f8f;">
+                  ${safeTicket}
+                </span>
               </p>
-              <p style="margin:6px 0 0;font-size:12px;color:#71717a;">
+              <p style="margin:12px 0 0;font-size:13px;line-height:1.5;color:#71717a;">
                 Present this QR code at the entrance for instant check-in.
               </p>
             </td>
@@ -216,9 +221,9 @@ ${updatedBanner}
 
           <!-- Footer -->
           <tr>
-            <td style="border-top:1px dashed #e4e4e7;padding:18px 28px;background:#fafafa;text-align:center;">
-              <p style="margin:0;font-size:11px;color:#71717a;">
-                Powered by <strong style="color:#18181b;">PassFlow</strong> · Keep this pass handy on your phone.
+            <td style="border-top:1px solid #efeaf9;padding:18px 32px;background-color:#faf8fe;text-align:center;">
+              <p style="margin:0;font-size:11px;color:#8b84a8;">
+                Sent automatically by <strong style="color:#4c3f8f;">PassFlow Events</strong> · Keep this pass handy on your phone.
               </p>
             </td>
           </tr>

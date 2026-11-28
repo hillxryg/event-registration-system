@@ -20,7 +20,7 @@ import type { CheckInResponse, EventItem } from '../types/database';
 import { supabase } from '../lib/supabase';
 
 const READER_ID = 'qr-reader';
-const SCAN_COOLDOWN_MS = 2500;
+const SAME_CODE_GAP_MS = 3000; // QR must leave the frame this long before the same code can scan again
 
 const getSlugFromPath = (): string | null => {
   const [, , slug] = window.location.pathname.split('/');
@@ -72,6 +72,7 @@ export default function ScannerPage() {
   const [cameraError, setCameraError] = useState(false);
 
   const lastScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+  const processingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,34 +109,43 @@ export default function ScannerPage() {
 
   const processTicket = useCallback(
     async (code: string) => {
-      if (!event) return;
+      if (!event || processingRef.current) return;
+
       const nowMs = Date.now();
-      if (
-        lastScanRef.current.code === code &&
-        nowMs - lastScanRef.current.at < SCAN_COOLDOWN_MS
-      ) {
+      const last = lastScanRef.current;
+      const sameCode = last.code === code;
+      const stillInFrame = nowMs - last.at < SAME_CODE_GAP_MS;
+
+      // Same QR still in view: refresh timestamp and ignore
+      if (sameCode && stillInFrame) {
+        lastScanRef.current = { code, at: nowMs };
         return;
       }
       lastScanRef.current = { code, at: nowMs };
 
-      const { data, error } = await supabase.rpc('verify_and_checkin', {
-        p_event_id: event.id,
-        p_ticket_code: code,
-        p_scanner_pin: verifiedPin,
-      });
-
-      if (error || !data) {
-        setScanState('invalid');
-        setResult({
-          status: 'invalid',
-          message: 'Could not verify ticket. Check your connection and try again.',
+      processingRef.current = true;
+      try {
+        const { data, error } = await supabase.rpc('verify_and_checkin', {
+          p_event_id: event.id,
+          p_ticket_code: code,
+          p_scanner_pin: verifiedPin,
         });
-        return;
-      }
 
-      const res = data as CheckInResponse;
-      setScanState(res.status === 'unauthorized' ? 'invalid' : res.status);
-      setResult(res);
+        if (error || !data) {
+          setScanState('invalid');
+          setResult({
+            status: 'invalid',
+            message: 'Could not verify ticket. Check your connection and try again.',
+          });
+          return;
+        }
+
+        const res = data as CheckInResponse;
+        setScanState(res.status === 'unauthorized' ? 'invalid' : res.status);
+        setResult(res);
+      } finally {
+        processingRef.current = false;
+      }
     },
     [event, verifiedPin],
   );
